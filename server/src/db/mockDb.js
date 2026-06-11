@@ -14,6 +14,18 @@ function emptyDb() {
   return {
     leads: [],
     calls: [],
+    // ---- richer CRM model (first-call verbal intake; docs collected later) ----
+    persons: [],
+    intakeRecords: [],
+    incidents: [],
+    injuries: [],
+    treatments: [],
+    insurances: [],
+    witnesses: [],
+    documentsToCollect: [],
+    structuredConsents: [],
+    callReviews: [],
+    optOuts: [],
     // ---- legacy ElevenLabs collections (kept so /tools/* + /debug/db still work) ----
     toolCalls: [],
     consents: [],
@@ -56,9 +68,41 @@ function persist() {
   }
 }
 
-function normalizePhone(phone) {
+export function normalizePhone(phone) {
   if (!phone) return '';
-  return String(phone).replace(/[^\d+]/g, '');
+  // Keep digits only, then drop a leading US country code so "+1 555 123 4567",
+  // "(555) 123-4567", and "5551234567" all compare equal.
+  let digits = String(phone).replace(/\D/g, '');
+  if (digits.length === 11 && digits.startsWith('1')) digits = digits.slice(1);
+  return digits;
+}
+
+/* ──────────── Generic document-store helpers (richer CRM model) ──────────── */
+
+export function insert(collection, record) {
+  ensureLoaded();
+  if (!db[collection]) db[collection] = [];
+  db[collection].push(record);
+  persist();
+  return record;
+}
+
+export function find(collection, predicate) {
+  ensureLoaded();
+  return (db[collection] || []).find(predicate) || null;
+}
+
+export function filter(collection, predicate) {
+  ensureLoaded();
+  return (db[collection] || []).filter(predicate);
+}
+
+export function updateWhere(collection, predicate, patch) {
+  ensureLoaded();
+  const matches = (db[collection] || []).filter(predicate);
+  for (const rec of matches) Object.assign(rec, patch);
+  if (matches.length) persist();
+  return matches;
 }
 
 /* ───────────────────────── Leads ───────────────────────── */
