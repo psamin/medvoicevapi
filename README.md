@@ -6,32 +6,35 @@ the conversation, collects every required field one question at a time, uses moc
 CRM tools instead of guessing, saves the transcript, runs post-call analysis, and
 knows when to escalate to a human.
 
-## How this evolved: ElevenLabs → Vapi
+## Provider setup (current)
 
-This repo started as an **ElevenLabs Conversational AI** prototype (still present and
-working — the `/` page and the `/tools/*`, `/api/get-signed-url` endpoints). It's
-being extended into a **Vapi** prototype. The ElevenLabs work is reused, not deleted:
+**Vapi manages the entire voice layer.** The Vapi assistant is configured to use:
 
-- The intake domain logic, guardrails, and prompt content carried over into the new
-  Vapi prompts.
-- ElevenLabs can still provide the **voice** — now **through Vapi** (see below).
+- **Transcriber:** Deepgram (through Vapi)
+- **Model:** OpenAI (through Vapi)
+- **Voice:** Vapi's built-in voice **"Elliot"**
 
-## Vapi + ElevenLabs architecture
+Because Vapi handles transcription, the model, and the voice, **this backend needs no
+ElevenLabs, Deepgram, or OpenAI keys** — those live inside the Vapi assistant config,
+not here. ElevenLabs is **not required** in the current version.
 
-- **Vapi** orchestrates the call: telephony / web calls, the LLM turn-taking, **tool
-  calls** (POSTs to this server's `/api/tools/*`), webhooks, and the end-of-call report.
-- **ElevenLabs** is the **voice/TTS provider configured inside Vapi**. You give Vapi
-  your ElevenLabs key + voice id in the Vapi dashboard; Vapi calls ElevenLabs for you.
-- **This local server** provides the **mock CRM**, the **Vapi tool endpoints**, and
-  **webhook handlers**. No real data, no production credentials.
+> This repo began as an ElevenLabs Conversational AI prototype. That code still
+> exists but is **legacy/optional** (the `/` page, `/api/get-signed-url`, and
+> `src/services/elevenlabs.js`, all clearly marked). It is not used by the Vapi path
+> and the app runs fine without any ElevenLabs key. Don't add ElevenLabs back unless
+> you intentionally switch the Vapi assistant's voice provider to a custom EL voice.
+
+## Architecture
+
+- **Vapi** orchestrates the call: telephony / web calls, transcription (Deepgram),
+  the model (OpenAI), the voice (Elliot), **tool calls** (POSTs to this server's tool
+  endpoints), webhooks, and the end-of-call report.
+- **This local server** provides the **mock CRM / local dev DB**, the **Vapi tool
+  endpoints**, and **webhook handlers**. No real data, no production credentials.
 
 ```
-Caller ⇄ Vapi (LLM + telephony + ElevenLabs voice) ⇄ webhooks/tool calls ⇄ Local Express server ⇄ Mock CRM (JSON)
+Caller ⇄ Vapi (Deepgram + OpenAI + Elliot voice) ⇄ webhooks/tool calls ⇄ Local Express server ⇄ Mock CRM (JSON)
 ```
-
-**Is ElevenLabs called directly by our server?** Only in the legacy web flow
-(`GET /api/get-signed-url`). For the Vapi path, ElevenLabs is reached **only through
-Vapi** — our server never calls ElevenLabs for Vapi calls.
 
 ## Project structure
 
@@ -85,19 +88,30 @@ cp frontend/.env.example frontend/.env.local
 
 ### Server (`server/.env`) — all SERVER-ONLY
 
+**Required:**
+
 | Variable | Where to get it | Notes |
 |---|---|---|
-| `PORT` | — | Default `3001`. |
-| `NODE_ENV` | — | `development`. |
-| `VAPI_API_KEY` | Vapi → **API Keys** (private) | **Secret.** Creates/triggers calls; verifies webhooks. Never expose. |
+| `VAPI_API_KEY` | Vapi → **API Keys** (private) | **Secret.** Creates/triggers calls. Never expose. |
 | `VAPI_ASSISTANT_ID` | Vapi → **Assistants** | Your intake assistant. |
 | `VAPI_PHONE_NUMBER_ID` | Vapi → **Phone Numbers** | For outbound/phone test calls. |
-| `VAPI_PUBLIC_KEY` | Vapi → **API Keys** (public) | Browser-safe. |
-| `ELEVENLABS_API_KEY` | elevenlabs.io → API key | **Secret.** For Vapi you paste this **into Vapi's voice config**, not here. Kept for the legacy web flow. |
-| `ELEVENLABS_VOICE_ID` | elevenlabs.io → Voices | The voice to speak with. |
-| `MOCK_DB_PATH` | — | Default `./data/mock-db.json`. |
-| `WEBHOOK_BASE_URL` | your ngrok HTTPS URL → port 3001 | Where Vapi POSTs tool calls / reports. |
-| `ELEVENLABS_AGENT_ID`, `NGROK_URL` | — | **Legacy** EL web flow only. |
+| `VAPI_WEBHOOK_SECRET` | you choose it | Shared secret to verify incoming Vapi requests. Set the same value in Vapi. Blank = skip (local dev only). |
+| `DATABASE_URL` | — | Placeholder for a future real DB; blank = use the JSON store. |
+
+**Optional / defaults:**
+
+| Variable | Notes |
+|---|---|
+| `PORT`, `NODE_ENV` | Default `3001` / `development`. |
+| `VAPI_PUBLIC_KEY` | Browser-safe; only for the `/vapi` web-call test page. |
+| `MOCK_DB_PATH` | Default `./data/mock-db.json` (the local dev DB). |
+| `WEBHOOK_BASE_URL` | Your ngrok HTTPS URL → port 3001; used to build tool Server URLs. |
+| `CRM_PROVIDER`, `CRM_API_KEY`, `CRM_BASE_URL` | Future real-CRM adapter; `mock` uses the JSON store. |
+
+**Not required (legacy/optional):** `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID`,
+`ELEVENLABS_AGENT_ID`, `NGROK_URL`, `DEEPGRAM_API_KEY`. Vapi handles voice,
+transcription, and the model — the app runs without these. Only set ElevenLabs vars
+if you intentionally use the legacy EL web flow or switch Vapi to a custom EL voice.
 
 ### Frontend (`frontend/.env.local`) — PUBLIC values only
 
@@ -107,7 +121,7 @@ cp frontend/.env.example frontend/.env.local
 | `NEXT_PUBLIC_VAPI_PUBLIC_KEY` | Optional — the `/vapi` page can also read the public key from the server. |
 | `NEXT_PUBLIC_VAPI_ASSISTANT_ID` | Optional — same. |
 
-**Secret vs exposable:** `VAPI_API_KEY` and `ELEVENLABS_API_KEY` are **server-only —
+**Secret vs exposable:** `VAPI_API_KEY` (and `VAPI_WEBHOOK_SECRET`) are **server-only —
 never put them in the frontend**. `VAPI_PUBLIC_KEY` and assistant IDs are browser-safe.
 
 ## Run the backend
@@ -148,21 +162,23 @@ Vapi assistants are created in the dashboard, so set this up before testing call
    - **System prompt:** paste the output of `GET http://localhost:3001/api/prompts/v1_direct`
      (or `v2_warm` / `v3_fast_screening`). The `/vapi` test page can also inject the
      selected version per call via assistant overrides.
-   - **Model:** any supported chat model (e.g. GPT-4o).
+   - **Transcriber:** Deepgram · **Model:** OpenAI · **Voice:** built-in **Elliot**
+     (all configured in Vapi — no keys needed in this repo).
    - **First message:** optional — the prompt already instructs the agent to greet.
    - Copy the **Assistant ID** → `VAPI_ASSISTANT_ID`.
-2. **Configure the ElevenLabs voice** — in the assistant's **Voice** tab, choose
-   **ElevenLabs (11labs)** as the provider, paste your **ElevenLabs API key**, and pick
-   your **Voice ID** (`ELEVENLABS_VOICE_ID`). This is how ElevenLabs is used "through Vapi."
-3. **Configure tools** — add each tool from
+2. **Configure tools** — add each tool from
    `GET http://localhost:3001/api/tools/_schema` (or `server/src/vapi/toolDefinitions.js`)
    as a **Function** tool with Server URL `${WEBHOOK_BASE_URL}/api/tools/<name>`
    (your ngrok URL → port 3001). Tools: `lookupLeadByPhone`, `createLead`, `updateLead`,
    `markOptOut`, `detectMissingFields`, `saveTranscript`, `savePostCallAnalysis`, `scoreCall`.
-4. **Keys** — Vapi → **API Keys**: copy the **private** key → `VAPI_API_KEY`, the
-   **public** key → `VAPI_PUBLIC_KEY`.
-5. **Phone number (for phone calls)** — Vapi → **Phone Numbers**: provision/import a
+3. **Keys** — Vapi → **API Keys**: copy the **private** key → `VAPI_API_KEY`, the
+   **public** key → `VAPI_PUBLIC_KEY`. Set a **server secret** matching `VAPI_WEBHOOK_SECRET`.
+4. **Phone number (for phone calls)** — Vapi → **Phone Numbers**: provision/import a
    number, copy its id → `VAPI_PHONE_NUMBER_ID`.
+
+> Voice is Vapi's built-in **Elliot** — ElevenLabs is not used. Only switch the Voice
+> tab to ElevenLabs if you deliberately want a custom EL voice (then add the EL key in
+> Vapi, still not in this repo).
 
 > Expose the server so Vapi can reach your tools: `ngrok http 3001`, then set
 > `WEBHOOK_BASE_URL` to the `https://…` URL and use it for the tool Server URLs.

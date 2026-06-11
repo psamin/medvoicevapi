@@ -1,3 +1,6 @@
+// ⚠️ LEGACY / OPTIONAL — direct ElevenLabs API client for the pre-Vapi web flow.
+// The current Vapi build does NOT use this (Vapi handles voice itself). Kept for
+// reference and only reachable via the legacy GET /api/get-signed-url route.
 // Uses Node 18+ built-in fetch — no extra dependency needed.
 export async function getSignedUrl(apiKey, agentId) {
   const url = `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`;

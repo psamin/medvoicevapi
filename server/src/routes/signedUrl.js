@@ -1,3 +1,7 @@
+// ⚠️ LEGACY / OPTIONAL — pre-Vapi ElevenLabs Conversational AI web flow.
+// Not used by the Vapi path (Vapi manages voice/transcription/model itself).
+// Kept for reference; safe to ignore. Returns a clear error if EL keys are unset,
+// so the app runs fine WITHOUT ElevenLabs configured.
 import { Router } from 'express';
 import { getSignedUrl } from '../services/elevenlabs.js';
 
@@ -7,9 +11,11 @@ router.get('/', async (_req, res) => {
   const { ELEVENLABS_API_KEY, ELEVENLABS_AGENT_ID } = process.env;
 
   if (!ELEVENLABS_API_KEY || !ELEVENLABS_AGENT_ID) {
-    return res.status(500).json({
+    return res.status(503).json({
       ok: false,
-      error: 'ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID must be set in .env',
+      error:
+        'Legacy ElevenLabs flow is not configured (ELEVENLABS_API_KEY/ELEVENLABS_AGENT_ID unset). ' +
+        'This is optional — the Vapi flow does not need it.',
     });
   }
 
