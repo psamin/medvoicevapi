@@ -2,6 +2,64 @@
 
 A minimal local test harness for the ElevenLabs Conversational AI personal injury intake voice agent. No database, no auth, no production dependencies — just a working backend with mock tool responses and a simple browser UI to run live voice tests.
 
+> **Migration in progress: ElevenLabs → Vapi.** This project began as the ElevenLabs prototype documented below and is being extended into a **Vapi**-based voice AI intake prototype. ElevenLabs can still be used — as the **voice provider _inside_ Vapi**. See [Vapi + ElevenLabs architecture](#vapi--elevenlabs-architecture) and [Environment variables](#environment-variables) for the new setup.
+
+---
+
+## Vapi + ElevenLabs architecture
+
+**Who does what:**
+
+- **Vapi** orchestrates the call: phone calling, the assistant/LLM turn-taking, **tool calls** (it POSTs to our server's tool endpoints), webhooks, and the end-of-call report. Vapi is the brain and the telephony layer.
+- **ElevenLabs** is (optionally) the **voice/TTS provider configured inside Vapi**. You give Vapi your ElevenLabs key + voice ID in the Vapi dashboard; Vapi calls ElevenLabs for you. Our server does **not** sit between Vapi and ElevenLabs.
+- **This local server** provides the **mock CRM/database**, the **Vapi tool endpoints** (`/api/tools/*`), and **webhook handlers**. It holds no real data and no production credentials.
+
+```
+Caller ⇄ Vapi (LLM + telephony + ElevenLabs voice) ⇄ (webhooks/tool calls) ⇄ Local Express server ⇄ Mock CRM JSON
+```
+
+**Is the ElevenLabs API used directly by our server?** Only in the **legacy** ElevenLabs web flow (`GET /api/get-signed-url`). For the Vapi path, ElevenLabs is reached **only through Vapi** — our server never calls ElevenLabs for Vapi calls.
+
+---
+
+## Environment variables
+
+Copy the example files and fill them in (never commit the real ones — both are gitignored):
+
+```bash
+cp server/.env.example server/.env
+cp frontend/.env.example frontend/.env.local
+```
+
+### Server (`server/.env`) — all SERVER-ONLY
+
+| Variable | Where to get it / put it | Notes |
+|---|---|---|
+| `PORT` | — | Defaults to `3001`. |
+| `NODE_ENV` | — | `development` locally. |
+| `VAPI_API_KEY` | Vapi dashboard → **API Keys** (private key) | **Server-only.** Creates/triggers calls + verifies webhooks. **Never** send to the browser. |
+| `VAPI_ASSISTANT_ID` | Vapi dashboard → **Assistants** → your assistant | ID of the assistant you create (see Vapi setup). |
+| `VAPI_PHONE_NUMBER_ID` | Vapi dashboard → **Phone Numbers** | Needed for outbound/phone test calls. |
+| `VAPI_PUBLIC_KEY` | Vapi dashboard → **API Keys** (public key) | Safe to expose. Mirror to the frontend. |
+| `ELEVENLABS_API_KEY` | elevenlabs.io → **Profile → API key** | **Server-only.** For Vapi, you actually paste this **into Vapi's voice config**, not here — kept here only for the legacy web flow. |
+| `ELEVENLABS_VOICE_ID` | elevenlabs.io → **Voices** | The voice to speak with. |
+| `MOCK_DB_PATH` | — | Defaults to `./data/mock-db.json`. |
+| `WEBHOOK_BASE_URL` | Your ngrok HTTPS URL → port 3001 | Public URL Vapi POSTs tool calls / end-of-call reports to. |
+| `ELEVENLABS_AGENT_ID`, `NGROK_URL` | — | **Legacy** ElevenLabs web flow only. Leave blank if Vapi-only. |
+
+### Frontend (`frontend/.env.local`) — PUBLIC values only
+
+| Variable | Notes |
+|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Local server URL (the spec's `VITE_SERVER_URL`; this app is Next.js so it uses the `NEXT_PUBLIC_` prefix). |
+| `NEXT_PUBLIC_VAPI_PUBLIC_KEY` | Vapi **public** key for browser Web SDK calls. |
+| `NEXT_PUBLIC_VAPI_ASSISTANT_ID` | Assistant to dial in web calls. |
+
+### Which keys are secret vs exposable
+
+- **Server-only (NEVER expose to the browser):** `VAPI_API_KEY`, `ELEVENLABS_API_KEY`. Anything that can spend money or impersonate you stays on the server.
+- **Safe for the browser:** `VAPI_PUBLIC_KEY` / `NEXT_PUBLIC_VAPI_PUBLIC_KEY`, assistant IDs, and the API base URL. The `NEXT_PUBLIC_` prefix is what ships a value to the browser — only put public values behind it.
+
 ---
 
 ## What this is
