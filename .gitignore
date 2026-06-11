@@ -23,3 +23,7 @@ yarn-error.log*
 .vercel
 dist/
 build/
+
+# Mock CRM data (generated at runtime)
+server/data/
+data/mock-db.json
