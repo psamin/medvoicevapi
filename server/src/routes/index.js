@@ -6,6 +6,7 @@ import callsRouter from './calls.js';
 import vapiToolsRouter from './vapiTools.js';
 import intakeRouter from './intake.js';
 import promptsRouter from './prompts.js';
+import vapiRouter from './vapi.js';
 
 export default function mountRoutes(app) {
   // ---- new Vapi CRM API ----
@@ -14,6 +15,7 @@ export default function mountRoutes(app) {
   app.use('/api/tools', vapiToolsRouter);
   app.use('/api/intake', intakeRouter);
   app.use('/api/prompts', promptsRouter);
+  app.use('/api/vapi', vapiRouter);
   app.use('/api/debug', debugRouter); // POST /api/debug/reset, GET /api/debug/db
 
   // ---- legacy ElevenLabs flow ----
