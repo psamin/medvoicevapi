@@ -10,6 +10,7 @@ import {
   listCalls,
 } from '../db/mockDb.js';
 import { REQUIRED_LEAD_FIELDS, computeMissingFields, isAnswered } from '../models.js';
+import { analyzeCall } from '../intake/postCallAnalysis.js';
 
 const router = Router();
 
@@ -28,6 +29,11 @@ function pickLeadFields(args = {}) {
     if (args[k] !== undefined) out[k] = args[k];
   }
   return out;
+}
+
+// Drop keys whose value is undefined so they don't clobber computed analysis.
+function stripUndefined(obj = {}) {
+  return Object.fromEntries(Object.entries(obj).filter(([, v]) => v !== undefined));
 }
 
 // POST /api/tools/lookupLeadByPhone — { phone }
@@ -122,45 +128,66 @@ router.post(
   })
 );
 
-// POST /api/tools/savePostCallAnalysis — { leadId|phone, ...analysis fields }
+// POST /api/tools/savePostCallAnalysis — { leadId|phone, transcript?, ...analysis }
+// Runs the analysis engine, then lets any explicitly-provided fields override it,
+// persists a call record, and reflects quality/status back onto the lead.
 router.post(
   '/savePostCallAnalysis',
   toolHandler('savePostCallAnalysis', (args) => {
     const lead = resolveLead(args);
+    const computed = analyzeCall({
+      lead: lead || pickLeadFields(args),
+      transcript: args.transcript,
+      botVersion: args.botVersion,
+      optedOut: args.optedOut ?? lead?.optedOut ?? false,
+      escalated: args.escalated ?? false,
+      duplicate: args.duplicate ?? false,
+    });
+    // Caller-provided values win over computed ones.
+    const a = { ...computed, ...stripUndefined(args) };
+
     const call = createCall({
       leadId: lead?.id ?? null,
       phone: args.phone ?? lead?.phone ?? null,
-      botVersion: args.botVersion ?? null,
+      botVersion: a.botVersion ?? null,
       transcript: args.transcript ?? null,
       outcome: args.outcome ?? 'analysis_saved',
-      leadQuality: args.leadQuality ?? null,
-      callerSentiment: args.callerSentiment ?? null,
-      confusionDetected: args.confusionDetected ?? false,
-      unhappyDetected: args.unhappyDetected ?? false,
-      missingInfo: args.missingInfo ?? args.missingFields ?? [],
-      callScore: args.callScore ?? args.intakeCompleteness ?? null,
-      failureReason: args.failureReason ?? null,
-      recommendedNextAction: args.recommendedNextAction ?? null,
+      leadQuality: a.leadQuality ?? null,
+      callerSentiment: a.callerSentiment ?? null,
+      confusionDetected: a.confusionDetected ?? false,
+      unhappyDetected: a.unhappyDetected ?? false,
+      missingInfo: a.missingInfo ?? a.missingFields ?? [],
+      callScore: a.callScore ?? a.intakeCompleteness ?? null,
+      failureReason: a.failureReason ?? null,
+      recommendedNextAction: a.recommendedNextAction ?? null,
     });
-    // Reflect quality back onto the lead if we have one.
-    if (lead && isAnswered(args.leadQuality)) {
-      updateLead(lead.id, { leadQualityScore: args.callScore ?? args.intakeCompleteness ?? null });
+
+    if (lead) {
+      const status =
+        a.recommendedNextAction === 'opted_out' ? 'opted_out'
+        : a.recommendedNextAction === 'human_escalation_needed' ? 'escalated'
+        : a.missingFields?.length ? 'in_progress'
+        : 'complete';
+      updateLead(lead.id, { leadQualityScore: a.callScore ?? a.intakeCompleteness ?? null, leadStatus: status });
     }
-    return { payload: { callId: call.id, call }, status: 201 };
+    return { payload: { callId: call.id, analysis: a, call }, status: 201 };
   })
 );
 
-// POST /api/tools/scoreCall — { id|leadId|phone, transcript? }
-// Basic completeness scoring here; Feature 8 plugs in the full analysis engine.
+// POST /api/tools/scoreCall — { id|leadId|phone, transcript? } → full analysis.
 router.post(
   '/scoreCall',
   toolHandler('scoreCall', (args) => {
     const lead = resolveLead(args);
-    const missingFields = lead ? computeMissingFields(lead) : REQUIRED_LEAD_FIELDS;
-    const filled = REQUIRED_LEAD_FIELDS.length - missingFields.length;
-    const intakeCompleteness = Math.round((filled / REQUIRED_LEAD_FIELDS.length) * 100);
-    const leadQuality = intakeCompleteness >= 80 ? 'high' : intakeCompleteness >= 50 ? 'medium' : 'low';
-    return { payload: { intakeCompleteness, leadQuality, missingFields } };
+    const analysis = analyzeCall({
+      lead: lead || pickLeadFields(args),
+      transcript: args.transcript,
+      botVersion: args.botVersion,
+      optedOut: args.optedOut ?? lead?.optedOut ?? false,
+      escalated: args.escalated ?? false,
+      duplicate: args.duplicate ?? false,
+    });
+    return { payload: analysis };
   })
 );
 
