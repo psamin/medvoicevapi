@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { toolHandler } from '../vapi/adapter.js';
 import { verifyVapiSecret } from '../vapi/verifySecret.js';
 import { processVapiEndOfCall, triggerVapiOutboundTestCall } from '../mvp/vapiService.js';
+import { markOptOut } from '../mvp/optOut.js';
 import {
   getCase,
   createOrUpdateClient,
@@ -63,6 +64,24 @@ router.post(
     const caseId = await resolveCaseId(args);
     if (!caseId) return { payload: { ok: false, error: 'provide caseId or phone' } };
     return { payload: { caseId, missingFields: await getMissingFields(caseId) } };
+  })
+);
+
+// POST /api/vapi/tools/record-opt-out — { phone, reason?, source?, caseId?, callId? }
+// The assistant calls this when the caller asks to stop/opt out. Reuses the shared
+// opt-out store, so it blocks future outbound calls to this number.
+router.post(
+  '/tools/record-opt-out',
+  verifyVapiSecret,
+  toolHandler('record-opt-out', async (args) => {
+    if (!args.phone) return { payload: { ok: false, error: 'phone is required' } };
+    const optOut = await markOptOut(args.phone, {
+      source: args.source || 'vapi_call',
+      reason: args.reason ?? args.transcript_snippet ?? null,
+      caseId: args.caseId ?? null,
+      callId: args.callId ?? null,
+    });
+    return { payload: { optedOut: true, optOutId: optOut.id, message: 'Opt-out recorded. This number will not be called again.' } };
   })
 );
 

@@ -1,1 +1,1 @@
-Hi, this is MedVoice, an AI assistant calling on behalf of the intake team. I can help collect some basic information about your potential injury case. Is now still a good time to talk?
+Hi, this is MedVoice, an AI assistant calling on behalf of the intake team about your potential injury case. Before we go on — you can opt out of these calls at any time; just say something like "stop calling me" or "remove me," and we won't call this number again. Is now still a good time to talk?
