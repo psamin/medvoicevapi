@@ -78,6 +78,23 @@ curl -X POST http://localhost:3001/api/vapi/outbound-test-call \
 # dry-run by default; set DRY_RUN_VAPI_CALLS=false + VAPI_* keys to place a real call
 ```
 
+## Opt-out handling (outbound)
+Outbound calls honor a do-not-call list backed by the shared CRM opt-out store
+(single source of truth — no duplicate state):
+- **Pre-dial check:** `/api/vapi/outbound-test-call` refuses opted-out numbers and
+  returns `{ skipped: true, reason: "opted_out" }` (never hits Vapi, not a failure).
+- **On the call:** the opening line discloses opt-out before the good-time check; if
+  the caller says "stop calling me" / "remove me" / "do not call", the assistant calls
+  the `record-opt-out` tool and ends.
+- **Inbound opt-outs** (via `/tools/record_opt_out`) block future outbound too.
+- **Dev/test endpoints:**
+  ```bash
+  curl "http://localhost:3001/api/vapi/opt-out?phone=+15551234567"      # status
+  curl -X POST http://localhost:3001/api/vapi/opt-out -H 'content-type: application/json' -d '{"phone":"+15551234567"}'
+  curl http://localhost:3001/api/vapi/opt-outs                           # list (debug)
+  ```
+Phone numbers are normalized (formatting + US country code) so all formats match.
+
 ## Test the intake form (no phone call needed)
 ```bash
 # 1) Simulate an end-of-call to create a case + token
