@@ -7,9 +7,13 @@ import vapiToolsRouter from './vapiTools.js';
 import intakeRouter from './intake.js';
 import promptsRouter from './prompts.js';
 import vapiRouter from './vapi.js';
+import crmToolsRouter from './crmTools.js';
 
 export default function mountRoutes(app) {
-  // ---- new Vapi CRM API ----
+  // ---- canonical Vapi CRM tools (snake_case, paste these into Vapi) ----
+  app.use('/tools', crmToolsRouter);
+
+  // ---- Vapi CRM API + earlier camelCase tools ----
   app.use('/api/leads', leadsRouter);
   app.use('/api/calls', callsRouter);
   app.use('/api/tools', vapiToolsRouter);
@@ -18,8 +22,8 @@ export default function mountRoutes(app) {
   app.use('/api/vapi', vapiRouter);
   app.use('/api/debug', debugRouter); // POST /api/debug/reset, GET /api/debug/db
 
-  // ---- legacy ElevenLabs flow ----
-  app.use('/tools', toolsRouter);
+  // ---- legacy ElevenLabs flow (screening tools + signed-url) ----
+  app.use('/tools', toolsRouter); // screen_eligibility, verify_conflict
   app.use('/debug', debugRouter);
   app.use('/api/get-signed-url', signedUrlRouter);
 }
