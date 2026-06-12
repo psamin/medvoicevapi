@@ -181,6 +181,17 @@ through Vapi (`/api/vapi/outbound-test-call`). Two optional tools
 (`upsert-intake-fields`, `get-missing-fields`) let the agent save fields mid-call.
 *(Configuration details are in [docs/medvoice-mvp.md](docs/medvoice-mvp.md).)*
 
+**Prompt management (config-as-code).** The repo's `prompts/*.md` files are the
+single source of truth. Deploy them to the persistent Vapi assistant via the API:
+```bash
+cd server && npm run sync:assistant         # PATCH the assistant from the prompt files
+#            npm run sync:assistant -- --create   # first time: make a new assistant
+```
+Don't hand-edit the prompt in the dashboard (it would drift from the repo). The
+`/vapi` web-call test page uses the **deployed assistant as-is** (no prompt override),
+so it faithfully matches real phone calls. Opt-out disclosure is **outbound-only** —
+the inbound intake prompt has no opt-out step.
+
 ## Email Flow
 
 ```mermaid

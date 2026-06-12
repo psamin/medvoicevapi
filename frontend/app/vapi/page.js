@@ -6,13 +6,11 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import Vapi from '@vapi-ai/web';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:3001';
-const BOT_VERSIONS = ['v1_direct', 'v2_warm', 'v3_fast_screening'];
 
 export default function VapiTest() {
   const [log, setLog] = useState([]);
   const [status, setStatus] = useState('idle'); // idle | connecting | connected
   const [speaking, setSpeaking] = useState(false);
-  const [botVersion, setBotVersion] = useState('v1_direct');
   const [health, setHealth] = useState(null);
   const [leads, setLeads] = useState([]);
   const [calls, setCalls] = useState([]);
@@ -47,7 +45,7 @@ export default function VapiTest() {
   async function handleStart() {
     try {
       setStatus('connecting');
-      addLog('event', `Loading Vapi config + ${botVersion} prompt...`);
+      addLog('event', 'Starting Vapi web call (using the deployed assistant)...');
 
       // Browser-safe config from the server (public key + assistant id), with
       // NEXT_PUBLIC_* overrides if you prefer to set them on the frontend.
@@ -61,9 +59,6 @@ export default function VapiTest() {
             '(or NEXT_PUBLIC_VAPI_* in frontend/.env.local). See README → Vapi setup.'
         );
       }
-
-      // Pull the selected bot version's system prompt to override the assistant.
-      const { prompt } = await fetch(`${API_BASE}/api/prompts/${botVersion}`).then((r) => r.json());
 
       if (!vapiRef.current) {
         const vapi = new Vapi(publicKey);
@@ -79,10 +74,9 @@ export default function VapiTest() {
         vapiRef.current = vapi;
       }
 
-      // assistantOverrides: swap in the chosen bot version's system prompt.
-      await vapiRef.current.start(assistantId, {
-        model: { provider: 'openai', model: 'gpt-4o', messages: [{ role: 'system', content: prompt }] },
-      });
+      // Use the assistant exactly as deployed in Vapi (single source of truth) —
+      // no prompt override, so the browser test matches real phone calls.
+      await vapiRef.current.start(assistantId);
     } catch (err) {
       setStatus('idle');
       addLog('error', err.message);
@@ -120,12 +114,6 @@ export default function VapiTest() {
         </div>
 
         <div style={s.controls}>
-          <label style={s.label}>
-            Bot version:&nbsp;
-            <select value={botVersion} onChange={(e) => setBotVersion(e.target.value)} disabled={isBusy} style={s.select}>
-              {BOT_VERSIONS.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-          </label>
           <button onClick={handleStart} disabled={isBusy} style={s.btn}>Start Vapi Web Call</button>
           <button onClick={handleStop} disabled={status !== 'connected'} style={{ ...s.btn, background: '#c0392b' }}>Stop</button>
           <button onClick={refreshData} style={{ ...s.btn, background: '#27ae60' }}>Refresh Data</button>

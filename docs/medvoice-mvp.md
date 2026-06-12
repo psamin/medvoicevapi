@@ -78,7 +78,22 @@ curl -X POST http://localhost:3001/api/vapi/outbound-test-call \
 # dry-run by default; set DRY_RUN_VAPI_CALLS=false + VAPI_* keys to place a real call
 ```
 
-## Opt-out handling (outbound)
+## Deploying the prompt (config-as-code)
+The `prompts/*.md` files are the source of truth; push them to the Vapi assistant:
+```bash
+cd server
+npm run sync:assistant -- --create   # first time → prints a new VAPI_ASSISTANT_ID to paste into .env
+npm run sync:assistant               # thereafter → PATCHes that assistant in place
+```
+It deploys `vapi-mvp-intake-agent.md` (system prompt) + `vapi-mvp-inbound-first-message.md`
+(first message), and — when `WEBHOOK_BASE_URL` is set — wires the end-of-call webhook
+and the `upsert-intake-fields` / `get-missing-fields` tools (with `VAPI_WEBHOOK_SECRET`).
+Edit a prompt file → commit → re-run sync. Don't hand-edit the dashboard prompt (drift).
+The `/vapi` web page uses the deployed assistant as-is (no override).
+
+## Opt-out handling (outbound only)
+Opt-out is an **outbound-only** concern — the inbound intake prompt has no opt-out
+step (an inbound caller dialed in; they're not on an outbound list).
 Outbound calls honor a do-not-call list backed by the shared CRM opt-out store
 (single source of truth — no duplicate state):
 - **Pre-dial check:** `/api/vapi/outbound-test-call` refuses opted-out numbers and
