@@ -6,7 +6,7 @@
 let warned = false;
 
 export function verifyVapiSecret(req, res, next) {
-  const secret = process.env.VAPI_WEBHOOK_SECRET;
+  const secret = process.env.VAPI_WEBHOOK_SECRET || process.env.VAPI_SERVER_URL_SECRET;
   if (!secret) {
     if (!warned) {
       console.warn('[vapi-auth] VAPI_WEBHOOK_SECRET not set — skipping webhook verification (dev only).');

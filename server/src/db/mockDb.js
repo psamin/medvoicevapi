@@ -14,6 +14,12 @@ function emptyDb() {
   return {
     leads: [],
     calls: [],
+    // ---- MedVoice MVP (client → case → intake fields → call → email) ----
+    clients: [],
+    cases: [],
+    intakeFields: [],
+    intakeCalls: [],
+    emailLogs: [],
     // ---- richer CRM model (first-call verbal intake; docs collected later) ----
     persons: [],
     intakeRecords: [],
