@@ -51,14 +51,21 @@ export function matchContact({ phone, name, email } = {}) {
 }
 
 // ── Opt-out ─────────────────────────────────────────────────────────────────
-export function recordOptOut({ caller_phone, channel = 'call_or_sms', transcript_snippet = null, timestamp } = {}) {
+export function recordOptOut({
+  caller_phone, channel = 'call_or_sms', transcript_snippet = null, timestamp,
+  source = null, caseId = null, clientId = null, callId = null,
+} = {}) {
   const lead = caller_phone ? findLeadByPhone(caller_phone) : null;
   const record = insert('optOuts', {
     id: `optout_${Date.now().toString(36)}`,
-    leadId: lead?.id ?? null,
+    leadId: lead?.id ?? clientId ?? null,
     phone: normalizePhone(caller_phone),
     channel,
     transcriptSnippet: transcript_snippet,
+    source: source ?? null, // vapi_outbound | vapi_inbound | manual | ...
+    caseId: caseId ?? null,
+    clientId: clientId ?? null,
+    callId: callId ?? null,
     createdAt: timestamp || new Date().toISOString(),
   });
   // Flag the lead so outbound workflows skip it.
