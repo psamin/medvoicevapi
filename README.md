@@ -199,25 +199,44 @@ instead of sending it and records an `EmailLog`. Reminders are basic in this MVP
 
 - Vapi voice intake agent (prompts + inbound webhook handling)
 - Vapi event / end-of-call processing
-- CRM / intake field storage (JSON dev DB)
+- CRM / intake field storage (local JSON dev store by default)
 - Prefilled 5-step client intake form
 - Emailing the form link (SendGrid or dry-run)
-- Basic outbound Vapi test call
+- Basic outbound Vapi test call + outbound opt-out / do-not-call handling
 - Simple reminder email endpoint
 - Dry-run modes for email and Vapi calls
-- **Postgres storage** (via `DATABASE_URL`) with a zero-setup JSON fallback
-- 28 automated checks (`npm test`)
+- 35 automated checks (`npm test`)
+
+## ⚠️ Known Constraints (must change before production)
+
+These are intentional MVP shortcuts — the app works locally today, but each of
+these needs to change before any real/production use:
+
+- **Storage is a local JSON dev store.** Postgres scaffolding exists behind a
+  repository (`server/src/mvp/repo.js`, set `DATABASE_URL`) but is unused by default
+  and unverified against a live DB. **Future:** run on a managed Postgres (or at
+  least SQLite locally); migrate the legacy CRM collections and the opt-out store
+  onto the same DB so nothing lives in the JSON file.
+- **No telephony provider integrated.** Calls go through Vapi only. **Future:**
+  **Twilio integration** (import/port a real number, SMS reminders) — none of the
+  Twilio path exists yet.
+- **Opt-out store lives in the JSON CRM layer**, not the MVP DB. **Future:** move it
+  onto the repo/Postgres path when storage is migrated.
+- **Email/calls default to dry-run** and the Vapi assistant is configured by hand in
+  the dashboard (not provisioned by code).
+- **No auth, rate limiting, or audit logging**; single-process only.
 
 ## Future Scope (planned, not implemented)
 
-- Twilio / SMS reminders
+- **Move storage to a managed database (Postgres)** — see Constraints above
+- **Twilio integration** — real number import/porting + SMS reminders
 - MCP tool layer
 - Admin CRM dashboard
-- Automated reminder scheduling
-- Production auth / roles
+- Automated reminder scheduling (no scheduler today)
+- Production auth / roles, rate limiting, audit logging
 - Human-handoff workflow *(the call sets a `humanFollowUpNeeded` flag today, but there's no downstream workflow)*
 - Deeper analytics / call scoring *(a heuristic post-call analyzer exists from an earlier layer; not wired into the MVP flow)*
-- Compliance review and audit logging
+- Compliance review (TCPA, recording-consent retention, PII handling)
 
 > Note: the repo also contains an **earlier CRM-tools layer** (`/tools/*`,
 > `server/src/crm/`) and Vapi capability research (`docs/vapi-capability-research.md`,
