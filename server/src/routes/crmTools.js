@@ -11,8 +11,12 @@ import {
   logConsent,
   saveIntake,
 } from '../crm/crmService.js';
+import { CRM_TOOL_DEFINITIONS } from '../crm/toolDefinitions.js';
 
 const router = Router();
+
+// GET /tools/_schema — the CRM tool definitions to paste into Vapi.
+router.get('/_schema', (_req, res) => res.json({ ok: true, tools: CRM_TOOL_DEFINITIONS }));
 
 // POST /tools/lookup_crm_contact — { phone, name, email, identity_confirmed? }
 // Detects duplicates / returning callers. Does NOT reveal prior case details

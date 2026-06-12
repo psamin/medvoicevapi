@@ -166,11 +166,22 @@ Vapi assistants are created in the dashboard, so set this up before testing call
      (all configured in Vapi — no keys needed in this repo).
    - **First message:** optional — the prompt already instructs the agent to greet.
    - Copy the **Assistant ID** → `VAPI_ASSISTANT_ID`.
-2. **Configure tools** — add each tool from
-   `GET http://localhost:3001/api/tools/_schema` (or `server/src/vapi/toolDefinitions.js`)
-   as a **Function** tool with Server URL `${WEBHOOK_BASE_URL}/api/tools/<name>`
-   (your ngrok URL → port 3001). Tools: `lookupLeadByPhone`, `createLead`, `updateLead`,
-   `markOptOut`, `detectMissingFields`, `saveTranscript`, `savePostCallAnalysis`, `scoreCall`.
+2. **Configure tools** — add each CRM tool from
+   `GET http://localhost:3001/tools/_schema` (or `server/src/crm/toolDefinitions.js`)
+   as a **Function** tool. Paste these Server URLs (replace the host with your ngrok URL):
+
+   | Tool | Server URL |
+   |---|---|
+   | `lookup_crm_contact` | `${WEBHOOK_BASE_URL}/tools/lookup_crm_contact` |
+   | `log_consent` | `${WEBHOOK_BASE_URL}/tools/log_consent` |
+   | `record_opt_out` | `${WEBHOOK_BASE_URL}/tools/record_opt_out` |
+   | `save_intake` | `${WEBHOOK_BASE_URL}/tools/save_intake` |
+   | `transfer_to_human` | `${WEBHOOK_BASE_URL}/tools/transfer_to_human` |
+   | `schedule_callback` | `${WEBHOOK_BASE_URL}/tools/schedule_callback` |
+
+   Set the assistant's **Server URL secret** to your `VAPI_WEBHOOK_SECRET` so the
+   server can verify these calls. (A simpler camelCase tool set also exists at
+   `/api/tools/*` — see `GET /api/tools/_schema` — used by the web test page.)
 3. **Keys** — Vapi → **API Keys**: copy the **private** key → `VAPI_API_KEY`, the
    **public** key → `VAPI_PUBLIC_KEY`. Set a **server secret** matching `VAPI_WEBHOOK_SECRET`.
 4. **Phone number (for phone calls)** — Vapi → **Phone Numbers**: provision/import a
@@ -210,12 +221,25 @@ Vapi dials the number with your assistant; tool calls hit `WEBHOOK_BASE_URL/api/
 | POST | `/api/leads/:id/opt-out` | Opt out |
 | GET/POST | `/api/calls` | List / create call records |
 | POST | `/api/debug/reset` | Clear mock DB |
-| POST | `/api/tools/*` | 8 Vapi tool handlers (see `/api/tools/_schema`) |
+| POST | `/tools/*` | **Canonical** CRM tools: `lookup_crm_contact`, `log_consent`, `record_opt_out`, `save_intake`, `transfer_to_human`, `schedule_callback` (see `/tools/_schema`) |
+| POST | `/api/tools/*` | Simpler camelCase tool set (used by the web test page) |
 | POST | `/api/intake/next` | State-machine next step |
 | GET | `/api/prompts`, `/api/prompts/:version` | Bot prompts |
 | GET | `/api/vapi/web-config` | Browser-safe Vapi config |
 
-Legacy ElevenLabs endpoints (`/tools/*`, `/api/get-signed-url`, `/debug/*`) remain.
+The `/tools/*` and `/api/tools/*` namespaces require the `x-vapi-secret` header
+when `VAPI_WEBHOOK_SECRET` is set. Legacy ElevenLabs endpoints remain:
+`/tools/screen_eligibility`, `/tools/verify_conflict`, `/api/get-signed-url`, `/debug/*`.
+
+## Data model & what the first call captures
+
+The local JSON dev DB holds: `leads`, `persons`, `intakeRecords`, `incidents`,
+`injuries`, `treatments`, `insurances`, `witnesses`, `documentsToCollect`,
+`structuredConsents`, `callReviews`, `optOuts`, and `calls`. **The first call is
+verbal only** — `save_intake` records whether evidence exists
+(`evidence_exists`) and queues a `documents_to_collect_later` checklist (police
+report, insurance card, photos, medical records, repair estimate, …) for a future
+follow-up workflow. It never requires the actual files.
 
 ## Known limitations
 
