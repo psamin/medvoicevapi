@@ -36,6 +36,65 @@ not here. ElevenLabs is **not required** in the current version.
 Caller ⇄ Vapi (Deepgram + OpenAI + Elliot voice) ⇄ webhooks/tool calls ⇄ Local Express server ⇄ Mock CRM (JSON)
 ```
 
+## How a call works (orchestration)
+
+Vapi runs the conversation; our server is the system of record it calls into. A
+single first-call intake plays out like this:
+
+```
+ Caller speaks ──► Vapi (Deepgram STT → OpenAI model → Elliot TTS)
+                         │  the assistant's system prompt makes it LEAD the call
+                         │  and call our tools instead of guessing
+                         ▼
+        ┌──────────────── tool calls (HTTPS POST, x-vapi-secret) ───────────────┐
+        ▼                                                                        │
+  Local Express server  (/tools/*  →  src/crm/crmService.js  →  JSON dev DB)     │
+        └──────────── JSON result ──► Vapi speaks the next line ─────────────────┘
+```
+
+**Step by step (what the assistant does, and the tool it calls):**
+
+1. **Greet + disclose.** Says it's an automated assistant, that the call may be
+   recorded, and offers opt-out → `log_consent` (`ai_disclosure`, `recording`).
+2. **Identify the caller.** `lookup_crm_contact({ phone, name, email })` →
+   `exact` / `possible` / `none`. Prior case details stay hidden until the caller's
+   identity is verified (`identity_confirmed: true`).
+   - **New caller** → proceeds to collect everything.
+   - **Returning caller** → confirms identity, then continues **only from the
+     missing fields** (no re-asking).
+3. **Lead the intake, one question at a time.** The deterministic state machine
+   (`src/intake/stateMachine.js`, also queryable at `POST /api/intake/next`) decides
+   the next required field so the agent can't skip anything. Fields are saved as they
+   come in. Required: name, phone, email, state/city, accident date & type, injured?,
+   treatment?, attorney?, plus a short case summary.
+4. **Documents = verbal only.** The agent records *whether* evidence exists
+   (police report, photos, insurance card, medical records…), never the files.
+5. **Guardrails / escalation.** Legal-advice or settlement-value questions, anger,
+   confusion, or "let me talk to a person" → `transfer_to_human`. Opt-out at any
+   point → `record_opt_out` (stops intake and blocks future outbound contact).
+6. **Save at the end.** `save_intake({ full_structured_record, call_review })`:
+   upserts the lead (de-dupes by phone), writes the related records, queues
+   `documents_to_collect_later` from the evidence flags, stores the post-call review,
+   and returns any still-missing fields.
+7. **Score + route.** Analysis (`src/intake/postCallAnalysis.js`) sets a recommended
+   next action: `ready_for_human_review`, `needs_follow_up`, `missing_required_info`,
+   `opted_out`, `duplicate_lead`, or `human_escalation_needed`. Optionally
+   `schedule_callback` (auto-refused if the caller opted out).
+8. **Later (separate workflow, not built yet):** collect the actual documents from
+   the `documents_to_collect_later` checklist.
+
+**Which module owns what:**
+
+| Concern | Lives in |
+|---|---|
+| Voice, transcription, model, turn-taking | Vapi (assistant config) |
+| What the agent says / how it leads | `src/prompts/intakePrompts.js` (3 versions) |
+| Tool endpoints Vapi calls | `src/routes/crmTools.js` → `src/crm/crmService.js` |
+| Vapi ⇄ JSON request/response shape + secret | `src/vapi/adapter.js`, `src/vapi/verifySecret.js` |
+| Next-question logic (can't skip required fields) | `src/intake/stateMachine.js` |
+| Post-call scoring / next action | `src/intake/postCallAnalysis.js` |
+| Data store (leads, docs, consents, opt-outs…) | `src/db/mockDb.js`, `src/crm/schema.js` |
+
 ## Project structure
 
 ```
@@ -45,21 +104,27 @@ server/                       Node + Express (ESM), port 3001
     models.js                 lead/call schemas + required-field logic
     db/mockDb.js              JSON-file-backed mock CRM (MOCK_DB_PATH)
     routes/
+      crmTools.js             CANONICAL Vapi CRM tools (/tools/*)
       leads.js, calls.js      CRM REST API (/api/leads, /api/calls)
-      vapiTools.js            Vapi tool handlers (/api/tools/*)
+      vapiTools.js            simpler camelCase tools (/api/tools/*, web page)
       intake.js               state-machine endpoint (/api/intake/next)
       prompts.js, vapi.js     prompt + Vapi web config endpoints
       tools.js, signedUrl.js  legacy ElevenLabs endpoints
       debug.js                /debug/db, /api/debug/reset
+    crm/
+      crmService.js           matching, opt-out, consent, save_intake logic
+      schema.js               entity factories + document checklist
+      toolDefinitions.js      /tools/* schemas to paste into Vapi
     intake/
       stateMachine.js         deterministic intake flow
       postCallAnalysis.js     scoring + recommended next action
     prompts/intakePrompts.js  3 bot versions + builder
     vapi/
       adapter.js              Vapi tool-call <-> JSON adapter
-      toolDefinitions.js      tool schemas to paste into Vapi
+      verifySecret.js         x-vapi-secret webhook verification
+      toolDefinitions.js      /api/tools/* schemas
   scripts/vapiCall.js         outbound phone test call (npm run call)
-  test/                       node:test E2E + unit suites
+  test/                       node:test E2E + unit suites (18 tests)
 frontend/                     Next.js 14 (App Router), port 3000
   app/page.js                 legacy ElevenLabs harness
   app/vapi/page.js            Vapi web-call test harness
@@ -68,9 +133,9 @@ frontend/                     Next.js 14 (App Router), port 3000
 ## Prerequisites
 
 - Node.js ≥ 18 (tested on v22)
-- A [Vapi](https://dashboard.vapi.ai) account
-- (Optional) an [ElevenLabs](https://elevenlabs.io) account for the voice
+- A [Vapi](https://dashboard.vapi.ai) account (it provides Deepgram, OpenAI, and the voice)
 - (Optional) `ngrok` to expose this server to Vapi for tool calls / phone calls
+- No ElevenLabs/Deepgram/OpenAI keys needed here — they live in the Vapi assistant
 
 ## Install
 
@@ -151,7 +216,7 @@ curl -X POST http://localhost:3001/api/debug/reset    # or the "Reset Mock DB" b
 ## Run the tests
 
 ```bash
-cd server && npm test     # node:test — 5 E2E scenarios + unit tests, no phone call needed
+cd server && npm test     # node:test — 18 tests (intake + 8-scenario CRM E2E + unit), no phone call needed
 ```
 
 ## Configure the Vapi assistant (manual — do this once)
@@ -207,7 +272,7 @@ cd server
 npm run call -- +1YOURNUMBER     # needs VAPI_API_KEY, VAPI_ASSISTANT_ID, VAPI_PHONE_NUMBER_ID
 ```
 
-Vapi dials the number with your assistant; tool calls hit `WEBHOOK_BASE_URL/api/tools/*`.
+Vapi dials the number with your assistant; tool calls hit `WEBHOOK_BASE_URL/tools/*`.
 
 ## API reference (new)
 
@@ -244,12 +309,16 @@ follow-up workflow. It never requires the actual files.
 ## Known limitations
 
 - **Mock only:** the CRM is a local JSON file; there is no real CRM, auth, or database.
+  `transfer_to_human` and `schedule_callback` return safe mock responses.
 - **No real telephony/voice without credentials:** web/phone calls require your own
-  Vapi (and ElevenLabs) accounts and a public tunnel; nothing is invented.
+  Vapi account and a public tunnel; nothing is invented.
 - **Assistant created manually** in the Vapi dashboard (not provisioned by code).
 - **Analysis is heuristic** (keyword-based sentiment/confusion), not an LLM judge.
-- **Webhook signatures not verified**, no rate limiting, single-process in-memory + file store.
+- **Webhook auth is a shared secret** (`x-vapi-secret`); full HMAC signature
+  verification, rate limiting, and a multi-process store are not implemented.
 - The state machine is a safety net/guide; the LLM still drives wording in real calls.
+- The **document-collection follow-up workflow is not built** — the first call only
+  queues `documents_to_collect_later`.
 
 ## What's needed for production
 
