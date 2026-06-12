@@ -23,15 +23,15 @@ router.post('/send-reminder', async (req, res) => {
 });
 
 // GET /api/intake/:token — prefilled form payload (staff-only fields excluded).
-router.get('/:token', (req, res) => {
-  const payload = generatePrefilledFormPayload(req.params.token);
+router.get('/:token', async (req, res) => {
+  const payload = await generatePrefilledFormPayload(req.params.token);
   if (!payload) return res.status(404).json({ ok: false, error: 'invalid or expired form link' });
   res.json({ ok: true, ...payload });
 });
 
 // POST /api/intake/:token — client submits (partial allowed). source=form.
-router.post('/:token', (req, res) => {
-  const theCase = getCaseByToken(req.params.token);
+router.post('/:token', async (req, res) => {
+  const theCase = await getCaseByToken(req.params.token);
   if (!theCase) return res.status(404).json({ ok: false, error: 'invalid or expired form link' });
 
   // Clients can never write staff-only fields, even if they post them.
@@ -40,13 +40,13 @@ router.post('/:token', (req, res) => {
     Object.entries(incoming).filter(([k]) => !STAFF_ONLY_FIELD_KEYS.includes(k))
   );
 
-  upsertIntakeFields(theCase.id, fields, 'form');
-  const updated = recomputeCaseStatus(theCase.id);
+  await upsertIntakeFields(theCase.id, fields, 'form');
+  const updated = await recomputeCaseStatus(theCase.id);
   res.json({
     ok: true,
     caseId: theCase.id,
     status: updated.status,
-    missingFields: getMissingFields(theCase.id),
+    missingFields: await getMissingFields(theCase.id),
   });
 });
 

@@ -36,7 +36,7 @@ flowchart TD
 
 - **Vapi Voice Agent** — runs the conversation: telephony, transcription (Deepgram), model (OpenAI), and the voice. Calls the backend via webhooks/tools.
 - **MedVoice Backend** (`server/`, Express/ESM) — receives Vapi events, runs the intake services, serves the form API, sends email, and triggers outbound test calls.
-- **CRM / Intake Storage** — a JSON file dev DB (`server/src/db/mockDb.js`); collections for clients, cases, intakeFields, intakeCalls, emailLogs. *(A real database is future scope — `DATABASE_URL` is a placeholder.)*
+- **CRM / Intake Storage** — pluggable behind a repository (`server/src/mvp/repo.js`): **Postgres** when `DATABASE_URL` is set (`server/src/db/pg.js` + `schema.sql`, `npm run migrate`), or a **JSON file dev store** (`server/src/db/mockDb.js`) with zero setup otherwise. Entities: clients, cases, intakeFields, intakeCalls, emailLogs.
 - **Intake Field Config** (`server/src/config/intakeFields.js`) — single source of truth for the 5-step form, what the call prioritizes, and required/conditional/staff-only/sensitive rules.
 - **Client Intake Form** (`frontend/app/intake/[token]/page.js`) — the prefilled, token-secured 5-step form.
 - **Email Service** (`server/src/mvp/emailService.js`) — SendGrid via REST, or dry-run.
@@ -205,6 +205,7 @@ instead of sending it and records an `EmailLog`. Reminders are basic in this MVP
 - Basic outbound Vapi test call
 - Simple reminder email endpoint
 - Dry-run modes for email and Vapi calls
+- **Postgres storage** (via `DATABASE_URL`) with a zero-setup JSON fallback
 - 28 automated checks (`npm test`)
 
 ## Future Scope (planned, not implemented)
@@ -217,7 +218,6 @@ instead of sending it and records an `EmailLog`. Reminders are basic in this MVP
 - Human-handoff workflow *(the call sets a `humanFollowUpNeeded` flag today, but there's no downstream workflow)*
 - Deeper analytics / call scoring *(a heuristic post-call analyzer exists from an earlier layer; not wired into the MVP flow)*
 - Compliance review and audit logging
-- Real database behind `DATABASE_URL`
 
 > Note: the repo also contains an **earlier CRM-tools layer** (`/tools/*`,
 > `server/src/crm/`) and Vapi capability research (`docs/vapi-capability-research.md`,

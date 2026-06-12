@@ -1,7 +1,7 @@
 // Email service for MedVoice. Sends via SendGrid REST API (no SDK dependency) when
 // configured; otherwise dry-runs (logs the email and records an EmailLog). Never
 // logs sensitive intake values — only subject + recipient + link.
-import { insert } from '../db/mockDb.js';
+import repo from './repo.js';
 import { newEmailLog } from './models.js';
 import {
   getCase,
@@ -9,6 +9,8 @@ import {
   generateIntakeToken,
   getMissingFields,
 } from './intakeService.js';
+
+const logEmail = (rec) => repo.emailLogs.insert(newEmailLog(rec));
 
 function isDryRun() {
   // Dry-run when explicitly enabled OR when no key is present (safe default).
@@ -23,14 +25,13 @@ function formUrl(token) {
 // Low-level send: dry-run logs; real send hits SendGrid v3. Always writes EmailLog.
 async function deliver({ caseId, toEmail, subject, body }) {
   if (!toEmail) {
-    const log = insert('emailLogs', newEmailLog({ caseId, toEmail, subject, body, status: 'failed', reason: 'no recipient email' }));
     console.warn(`[email] skipped (no recipient) case=${caseId}`);
-    return log;
+    return logEmail({ caseId, toEmail, subject, body, status: 'failed', reason: 'no recipient email' });
   }
 
   if (isDryRun()) {
     console.log(`[email:dry-run] to=${toEmail} subject="${subject}"`);
-    return insert('emailLogs', newEmailLog({ caseId, toEmail, subject, body, status: 'dry_run', reason: 'DRY_RUN_EMAILS or missing SENDGRID_API_KEY' }));
+    return logEmail({ caseId, toEmail, subject, body, status: 'dry_run', reason: 'DRY_RUN_EMAILS or missing SENDGRID_API_KEY' });
   }
 
   try {
@@ -47,22 +48,22 @@ async function deliver({ caseId, toEmail, subject, body }) {
     if (!res.ok) {
       const reason = `SendGrid ${res.status}: ${(await res.text()).slice(0, 200)}`;
       console.error(`[email] send failed case=${caseId}: ${reason}`);
-      return insert('emailLogs', newEmailLog({ caseId, toEmail, subject, body, status: 'failed', reason }));
+      return logEmail({ caseId, toEmail, subject, body, status: 'failed', reason });
     }
     console.log(`[email] sent to=${toEmail} subject="${subject}"`);
-    return insert('emailLogs', newEmailLog({ caseId, toEmail, subject, body, status: 'sent' }));
+    return logEmail({ caseId, toEmail, subject, body, status: 'sent' });
   } catch (err) {
     console.error(`[email] send error case=${caseId}: ${err.message}`);
-    return insert('emailLogs', newEmailLog({ caseId, toEmail, subject, body, status: 'failed', reason: err.message }));
+    return logEmail({ caseId, toEmail, subject, body, status: 'failed', reason: err.message });
   }
 }
 
 // Email the secure intake form link after a call.
 export async function sendIntakeFormEmail(caseId) {
-  const theCase = getCase(caseId);
+  const theCase = await getCase(caseId);
   if (!theCase) throw new Error(`case not found: ${caseId}`);
-  const client = theCase.clientId ? getClient(theCase.clientId) : null;
-  const token = generateIntakeToken(caseId);
+  const client = theCase.clientId ? await getClient(theCase.clientId) : null;
+  const token = await generateIntakeToken(caseId);
   const link = formUrl(token);
   const name = client?.firstName ? ` ${client.firstName}` : '';
   const subject = 'Complete your MedVoice intake form';
@@ -78,14 +79,14 @@ export async function sendIntakeFormEmail(caseId) {
 
 // Basic reminder when required fields remain (no scheduling logic in this MVP).
 export async function sendSimpleReminderEmail(caseId) {
-  const theCase = getCase(caseId);
+  const theCase = await getCase(caseId);
   if (!theCase) throw new Error(`case not found: ${caseId}`);
-  const client = theCase.clientId ? getClient(theCase.clientId) : null;
-  const missing = getMissingFields(caseId);
+  const client = theCase.clientId ? await getClient(theCase.clientId) : null;
+  const missing = await getMissingFields(caseId);
   if (!client?.email) return { skipped: true, reason: 'no client email' };
   if (missing.length === 0) return { skipped: true, reason: 'nothing missing' };
 
-  const token = generateIntakeToken(caseId);
+  const token = await generateIntakeToken(caseId);
   const link = formUrl(token);
   const subject = 'Reminder: finish your MedVoice intake form';
   const body =

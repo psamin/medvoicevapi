@@ -1,6 +1,6 @@
 // Vapi-facing MVP services: turn an end-of-call report into CRM records + an
 // emailed intake form, and place outbound TEST calls through Vapi (no Twilio).
-import { insert } from '../db/mockDb.js';
+import repo from './repo.js';
 import { newIntakeCall, CASE_STATUS } from './models.js';
 import {
   createOrUpdateClient,
@@ -44,17 +44,16 @@ export async function processVapiEndOfCall(body = {}) {
   const fields = { ...e.fields };
   if (!fields.phone && e.customerPhone) fields.phone = e.customerPhone;
 
-  const client = createOrUpdateClient(fields);
-  const theCase = createOrUpdateCase(client.id, fields);
+  const client = await createOrUpdateClient(fields);
+  const theCase = await createOrUpdateCase(client.id, fields);
 
-  upsertIntakeFields(theCase.id, fields, 'call');
+  await upsertIntakeFields(theCase.id, fields, 'call');
 
   // Human-follow-up flag from the call.
   const humanFollowUp = fields.humanFollowUpNeeded === true || fields.humanFollowUpNeeded === 'true';
-  if (humanFollowUp) updateCase(theCase.id, { humanFollowUpNeeded: true });
+  if (humanFollowUp) await updateCase(theCase.id, { humanFollowUpNeeded: true });
 
-  const call = insert(
-    'intakeCalls',
+  const call = await repo.intakeCalls.insert(
     newIntakeCall({
       caseId: theCase.id, vapiCallId: e.vapiCallId, direction: e.direction, status: e.status,
       transcript: e.transcript, summary: e.summary, recordingUrl: e.recordingUrl,
@@ -62,8 +61,8 @@ export async function processVapiEndOfCall(body = {}) {
     })
   );
 
-  const token = generateIntakeToken(theCase.id);
-  updateCase(theCase.id, {
+  const token = await generateIntakeToken(theCase.id);
+  await updateCase(theCase.id, {
     status: humanFollowUp ? CASE_STATUS.HUMAN_FOLLOW_UP_NEEDED : CASE_STATUS.INTAKE_FORM_SENT,
   });
 
@@ -75,7 +74,7 @@ export async function processVapiEndOfCall(body = {}) {
     caseId: theCase.id,
     callId: call.id,
     token,
-    missingFields: getMissingFields(theCase.id),
+    missingFields: await getMissingFields(theCase.id),
     emailStatus: emailLog?.status ?? null,
   };
 }
@@ -87,7 +86,7 @@ export async function triggerVapiOutboundTestCall({ phone, caseId = null } = {})
 
   if (dryRun) {
     console.log(`[vapi-call:dry-run] outbound to ${phone} (assistant=${process.env.VAPI_ASSISTANT_ID || 'unset'})`);
-    if (caseId) insert('intakeCalls', newIntakeCall({ caseId, direction: 'outbound', status: 'dry_run' }));
+    if (caseId) await repo.intakeCalls.insert(newIntakeCall({ caseId, direction: 'outbound', status: 'dry_run' }));
     return { dryRun: true, phone, caseId, message: 'DRY_RUN_VAPI_CALLS or missing VAPI_API_KEY — call not placed.' };
   }
 
@@ -103,6 +102,6 @@ export async function triggerVapiOutboundTestCall({ phone, caseId = null } = {})
   const text = await res.text();
   if (!res.ok) throw new Error(`Vapi call API ${res.status}: ${text.slice(0, 200)}`);
   const data = JSON.parse(text);
-  if (caseId) insert('intakeCalls', newIntakeCall({ caseId, vapiCallId: data.id, direction: 'outbound', status: data.status ?? 'queued' }));
+  if (caseId) await repo.intakeCalls.insert(newIntakeCall({ caseId, vapiCallId: data.id, direction: 'outbound', status: data.status ?? 'queued' }));
   return { dryRun: false, vapiCallId: data.id, status: data.status, phone, caseId };
 }

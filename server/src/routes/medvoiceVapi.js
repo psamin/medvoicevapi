@@ -15,11 +15,11 @@ import {
 const router = Router();
 
 // Resolve a case from a tool call: by caseId, or by phone (find/create).
-function resolveCaseId(args = {}) {
-  if (args.caseId && getCase(args.caseId)) return args.caseId;
+async function resolveCaseId(args = {}) {
+  if (args.caseId && (await getCase(args.caseId))) return args.caseId;
   if (args.phone) {
-    const client = createOrUpdateClient({ phone: args.phone });
-    return createOrUpdateCase(client.id, {}).id;
+    const client = await createOrUpdateClient({ phone: args.phone });
+    return (await createOrUpdateCase(client.id, {})).id;
   }
   return null;
 }
@@ -46,12 +46,12 @@ router.post('/end-of-call', verifyVapiSecret, async (req, res) => {
 router.post(
   '/tools/upsert-intake-fields',
   verifyVapiSecret,
-  toolHandler('upsert-intake-fields', (args) => {
-    const caseId = resolveCaseId(args);
+  toolHandler('upsert-intake-fields', async (args) => {
+    const caseId = await resolveCaseId(args);
     if (!caseId) return { payload: { ok: false, error: 'provide caseId or phone' } };
     const fields = args.fields ?? args;
-    const saved = upsertIntakeFields(caseId, fields, 'call');
-    return { payload: { caseId, saved: saved.length, missingFields: getMissingFields(caseId) } };
+    const saved = await upsertIntakeFields(caseId, fields, 'call');
+    return { payload: { caseId, saved: saved.length, missingFields: await getMissingFields(caseId) } };
   })
 );
 
@@ -59,10 +59,10 @@ router.post(
 router.post(
   '/tools/get-missing-fields',
   verifyVapiSecret,
-  toolHandler('get-missing-fields', (args) => {
-    const caseId = resolveCaseId(args);
+  toolHandler('get-missing-fields', async (args) => {
+    const caseId = await resolveCaseId(args);
     if (!caseId) return { payload: { ok: false, error: 'provide caseId or phone' } };
-    return { payload: { caseId, missingFields: getMissingFields(caseId) } };
+    return { payload: { caseId, missingFields: await getMissingFields(caseId) } };
   })
 );
 

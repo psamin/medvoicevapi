@@ -36,8 +36,22 @@ chasing, auth/roles/analytics/multi-tenant. (See "Future scope" in the README.)
 cd server && npm install && npm run dev      # http://localhost:3001
 cd frontend && npm install && npm run dev    # http://localhost:3000
 cp server/.env.example server/.env           # fill in when you have keys
-cd server && npm test                         # 28 tests, all dry-run
+cd server && npm test                         # 28 tests, all dry-run (JSON store)
 ```
+
+## Storage: Postgres or JSON
+Storage is pluggable behind `server/src/mvp/repo.js`:
+- **JSON dev store (default):** no setup; data persists to `server/data/mock-db.json`. Used by tests.
+- **Postgres:** set `DATABASE_URL` in `server/.env`, then:
+  ```bash
+  cd server
+  npm run migrate     # creates tables from src/db/schema.sql
+  npm run db:smoke    # end-to-end check through the app (creates a "Smoke Test" row)
+  npm run dev         # boot log shows "Storage: postgres"
+  ```
+  Tables: `clients`, `cases`, `intake_fields`, `intake_calls`, `email_logs`
+  (record JSONB + indexed lookup columns). Set `PGSSL=disable` for a local server
+  without SSL. Nothing else in the app changes between backends.
 
 ## Expose the backend to Vapi (ngrok)
 ```bash

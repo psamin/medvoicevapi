@@ -8,12 +8,15 @@
     "dev": "node --watch src/index.js",
     "setup": "node scripts/setupAgent.js",
     "call": "node scripts/vapiCall.js",
+    "migrate": "node scripts/migrate.js",
+    "db:smoke": "node scripts/dbSmoke.js",
     "test": "node --test"
   },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^5.0.0"
+    "express": "^5.0.0",
+    "pg": "^8.21.0"
   },
   "engines": {
     "node": ">=18.0.0"
