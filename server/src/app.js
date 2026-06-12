@@ -10,6 +10,9 @@ app.use(express.json());
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'voice-agent-test-backend' });
 });
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, service: 'medvoice', time: new Date().toISOString() });
+});
 
 mountRoutes(app);
 

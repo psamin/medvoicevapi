@@ -8,9 +8,17 @@ import intakeRouter from './intake.js';
 import promptsRouter from './prompts.js';
 import vapiRouter from './vapi.js';
 import crmToolsRouter from './crmTools.js';
+import medvoiceVapiRouter from './medvoiceVapi.js';
+import medvoiceFormRouter from './medvoiceForm.js';
 import { verifyVapiSecret } from '../vapi/verifySecret.js';
 
 export default function mountRoutes(app) {
+  // ---- MedVoice MVP ----
+  // Vapi-facing endpoints; the inbound webhook/tool routes are secret-gated inside
+  // the router so this mount doesn't gate the sibling /api/vapi/web-config route.
+  app.use('/api/vapi', medvoiceVapiRouter);
+  // Client intake form API + reminder (mounted AFTER intakeRouter below sees /next).
+
   // ---- canonical Vapi CRM tools (snake_case, paste these into Vapi) ----
   app.use('/tools', verifyVapiSecret, crmToolsRouter);
 
@@ -19,6 +27,7 @@ export default function mountRoutes(app) {
   app.use('/api/calls', callsRouter);
   app.use('/api/tools', verifyVapiSecret, vapiToolsRouter);
   app.use('/api/intake', intakeRouter);
+  app.use('/api/intake', medvoiceFormRouter);
   app.use('/api/prompts', promptsRouter);
   app.use('/api/vapi', vapiRouter);
   app.use('/api/debug', debugRouter); // POST /api/debug/reset, GET /api/debug/db
