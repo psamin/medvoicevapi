@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { toolHandler } from '../vapi/adapter.js';
 import { verifyVapiSecret } from '../vapi/verifySecret.js';
 import { processVapiEndOfCall, triggerVapiOutboundTestCall } from '../mvp/vapiService.js';
-import { markOptOut } from '../mvp/optOut.js';
+import { markOptOut, isOptedOut, normalizePhoneNumber, listOptOuts } from '../mvp/optOut.js';
 import {
   getCase,
   createOrUpdateClient,
@@ -91,6 +91,28 @@ router.post('/outbound-test-call', async (req, res) => {
   if (!phone) return res.status(400).json({ ok: false, error: 'phone is required' });
   const result = await triggerVapiOutboundTestCall({ phone, caseId });
   res.json({ ok: true, ...result });
+});
+
+/* ── DEV / TEST opt-out endpoints (no auth; for local verification) ── */
+
+// GET /api/vapi/opt-out?phone=...  → check opt-out status for a number.
+router.get('/opt-out', async (req, res) => {
+  const phone = req.query.phone;
+  if (!phone) return res.status(400).json({ ok: false, error: 'phone query param required' });
+  res.json({ ok: true, phone, normalized: normalizePhoneNumber(phone), optedOut: await isOptedOut(phone) });
+});
+
+// POST /api/vapi/opt-out  { phone, reason? }  → manually mark a number opted out.
+router.post('/opt-out', async (req, res) => {
+  const { phone, reason } = req.body || {};
+  if (!phone) return res.status(400).json({ ok: false, error: 'phone is required' });
+  const optOut = await markOptOut(phone, { source: 'manual', reason });
+  res.json({ ok: true, optedOut: true, optOutId: optOut.id, normalized: normalizePhoneNumber(phone) });
+});
+
+// GET /api/vapi/opt-outs  → list all opt-out records (debug).
+router.get('/opt-outs', async (_req, res) => {
+  res.json({ ok: true, optOuts: await listOptOuts() });
 });
 
 export default router;
