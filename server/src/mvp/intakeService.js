@@ -64,6 +64,18 @@ export async function getClient(clientId) {
   return repo.clients.findById(clientId);
 }
 
+// Flag a case as a possible duplicate when ANOTHER client has the same name
+// (phone/email already de-dupe exact matches; this catches same-name, new-number).
+// Never auto-merges — just flags for staff review.
+export async function flagPossibleDuplicate(caseId, client) {
+  if (!client || (!client.firstName && !client.lastName)) return false;
+  const sameName = (await repo.clients.findByName(client.firstName, client.lastName))
+    .filter((c) => c.id !== client.id);
+  if (!sameName.length) return false;
+  await updateCase(caseId, { possibleDuplicate: true, duplicateOfClientId: sameName[0].id });
+  return true;
+}
+
 /* ── Intake fields (normalized, one row per case+key) ── */
 // incoming: array of { key, value, confidence? } OR an object { key: value, ... }
 export async function upsertIntakeFields(caseId, incoming = [], source = 'call') {

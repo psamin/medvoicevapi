@@ -12,6 +12,7 @@ import {
 } from '../db/mockDb.js';
 
 const OPEN_EXCLUDED = ['closed', 'completed'];
+const norm = (s) => (s ? String(s).trim().toLowerCase() : '');
 
 /* ───────────────────────── JSON backend ───────────────────────── */
 const jsonRepo = {
@@ -25,6 +26,11 @@ const jsonRepo = {
     },
     async findById(id) {
       return jFind('clients', (c) => c.id === id);
+    },
+    async findByName(firstName, lastName) {
+      const f = norm(firstName), l = norm(lastName);
+      if (!f && !l) return [];
+      return jFilter('clients', (c) => norm(c.firstName) === f && norm(c.lastName) === l);
     },
     async save(rec) {
       if (jFind('clients', (c) => c.id === rec.id)) jUpdate('clients', (c) => c.id === rec.id, rec);
@@ -42,6 +48,9 @@ const jsonRepo = {
     async findOpenByClient(clientId) {
       const open = jFilter('cases', (c) => c.clientId === clientId && !OPEN_EXCLUDED.includes(c.status));
       return open.length ? open[open.length - 1] : null;
+    },
+    async list() {
+      return jFilter('cases', () => true);
     },
     async save(rec) {
       if (jFind('cases', (c) => c.id === rec.id)) jUpdate('cases', (c) => c.id === rec.id, rec);
@@ -62,8 +71,14 @@ const jsonRepo = {
       return rec;
     },
   },
-  intakeCalls: { async insert(rec) { return jInsert('intakeCalls', rec); } },
-  emailLogs: { async insert(rec) { return jInsert('emailLogs', rec); } },
+  intakeCalls: {
+    async insert(rec) { return jInsert('intakeCalls', rec); },
+    async listByCase(caseId) { return jFilter('intakeCalls', (r) => r.caseId === caseId); },
+  },
+  emailLogs: {
+    async insert(rec) { return jInsert('emailLogs', rec); },
+    async listByCase(caseId) { return jFilter('emailLogs', (r) => r.caseId === caseId); },
+  },
 };
 
 /* ───────────────────────── Postgres backend ───────────────────────── */
@@ -80,6 +95,14 @@ const pgRepo = {
     },
     async findById(id) {
       return one(await query('SELECT doc FROM clients WHERE id=$1', [id]));
+    },
+    async findByName(firstName, lastName) {
+      const f = norm(firstName), l = norm(lastName);
+      if (!f && !l) return [];
+      return (await query(
+        `SELECT doc FROM clients WHERE lower(doc->>'firstName')=$1 AND lower(doc->>'lastName')=$2`,
+        [f, l]
+      )).rows.map((r) => r.doc);
     },
     async save(rec) {
       await query(
@@ -102,6 +125,9 @@ const pgRepo = {
         `SELECT doc FROM cases WHERE client_id=$1 AND status <> ALL($2) ORDER BY updated_at DESC LIMIT 1`,
         [clientId, OPEN_EXCLUDED]
       ));
+    },
+    async list() {
+      return (await query('SELECT doc FROM cases ORDER BY updated_at DESC')).rows.map((r) => r.doc);
     },
     async save(rec) {
       await query(
@@ -133,11 +159,17 @@ const pgRepo = {
       await query('INSERT INTO intake_calls (id, case_id, doc) VALUES ($1,$2,$3)', [rec.id, rec.caseId || null, rec]);
       return rec;
     },
+    async listByCase(caseId) {
+      return (await query('SELECT doc FROM intake_calls WHERE case_id=$1 ORDER BY created_at', [caseId])).rows.map((r) => r.doc);
+    },
   },
   emailLogs: {
     async insert(rec) {
       await query('INSERT INTO email_logs (id, case_id, doc) VALUES ($1,$2,$3)', [rec.id, rec.caseId || null, rec]);
       return rec;
+    },
+    async listByCase(caseId) {
+      return (await query('SELECT doc FROM email_logs WHERE case_id=$1 ORDER BY created_at', [caseId])).rows.map((r) => r.doc);
     },
   },
 };

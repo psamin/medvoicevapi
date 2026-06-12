@@ -92,6 +92,29 @@ test('7. form submission updates fields with source=form', async () => {
   assert.equal(fld.source, 'form');
 });
 
+test('same phone is NOT flagged duplicate; same name + new phone IS flagged', async () => {
+  await post('/api/vapi/end-of-call', { message: { type: 'end-of-call-report', analysis: { structuredData: { firstName: 'Dup', lastName: 'Test', phone: '+15557770001' } } } });
+  // same phone again -> same client, not a duplicate flag
+  const same = await post('/api/vapi/end-of-call', { message: { type: 'end-of-call-report', analysis: { structuredData: { firstName: 'Dup', lastName: 'Test', phone: '5557770001' } } } });
+  assert.equal(same.possibleDuplicate, false);
+  // same name, different phone -> flagged
+  const dup = await post('/api/vapi/end-of-call', { message: { type: 'end-of-call-report', analysis: { structuredData: { firstName: 'Dup', lastName: 'Test', phone: '+15558880002' } } } });
+  assert.equal(dup.possibleDuplicate, true);
+  const theCase = (await get(`/api/cases/${dup.caseId}`)).case;
+  assert.equal(theCase.possibleDuplicate, true);
+  assert.ok(theCase.duplicateOfClient, 'links to the other client');
+});
+
+test('dashboard returns enriched cases', async () => {
+  const r = await runCall();
+  const list = await get('/api/cases');
+  assert.ok(list.count >= 1);
+  const c = list.cases.find((x) => x.id === r.caseId);
+  assert.ok(c.client, 'has client');
+  assert.ok(c.fields.length > 0, 'has fields');
+  assert.ok(c.fields.every((f) => 'source' in f && 'status' in f));
+});
+
 test('8. missing fields calculated correctly', async () => {
   // Minimal call: only name + phone → several required fields still missing.
   const r = await post('/api/vapi/end-of-call', { message: { type: 'end-of-call-report', call: { id: 'c2' }, analysis: { structuredData: { firstName: 'Sam', phone: '+15554440000' } } } });

@@ -172,6 +172,18 @@ Each intake field records where its value came from: `call`, `form`, `staff`, or
 the client confirmed in the form, compute which required fields are still missing,
 and keep prefilled values editable.
 
+**Duplicate handling.** Clients are de-duped exactly by **phone (normalized) or
+email** — the same caller (even with the number typed differently) updates the same
+record. A returning caller with the **same name but a new number** can't be matched
+exactly, so the case is **flagged `possibleDuplicate`** (linked to the other client)
+for staff review on the dashboard — it is never auto-merged, since two people can
+share a name.
+
+**Dashboard.** `/dashboard` is a read-only staff view of every saved case: client,
+status, captured fields (tagged by source), call transcripts/summaries, emails sent,
+missing fields, and duplicate/human-follow-up flags. It auto-refreshes, so cases
+appear right after a call ends.
+
 ## Vapi Integration (conceptual)
 
 Vapi runs the voice agent and handles the phone call, then sends call data back to
@@ -214,9 +226,11 @@ instead of sending it and records an `EmailLog`. Reminders are basic in this MVP
 - Prefilled 5-step client intake form
 - Emailing the form link (SendGrid or dry-run)
 - Basic outbound Vapi test call + outbound opt-out / do-not-call handling
+- Duplicate detection: exact de-dupe by phone/email + **possible-duplicate flag** by name (flagged for review, never auto-merged)
+- Read-only **staff dashboard** (`/dashboard`) showing every case, fields by source, transcripts, emails, missing fields, and duplicate flags
 - Simple reminder email endpoint
 - Dry-run modes for email and Vapi calls
-- 35 automated checks (`npm test`)
+- 37 automated checks (`npm test`)
 
 ## ⚠️ Known Constraints (must change before production)
 

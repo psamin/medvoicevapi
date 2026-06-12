@@ -110,6 +110,19 @@ Outbound calls honor a do-not-call list backed by the shared CRM opt-out store
   ```
 Phone numbers are normalized (formatting + US country code) so all formats match.
 
+## View saved data (staff dashboard)
+After a call ends (or any simulated end-of-call), open **http://localhost:3000/dashboard**
+— a read-only view of every case: client, status, captured fields (tagged `call` /
+`form`), transcripts/summaries, emails, missing fields, and flags. It auto-refreshes
+every 5s, so a case appears right after the call ends. (Raw data is also at
+`GET /api/cases` and `GET /api/debug/db`.)
+
+## Duplicate detection
+- **Exact de-dupe** by phone (normalized) or email — same caller updates the same client.
+- **Possible duplicate** when the name matches an existing client but the number is new:
+  the case is flagged `possibleDuplicate` (linked to the other client) for staff review
+  on the dashboard. Never auto-merged.
+
 ## Test the intake form (no phone call needed)
 ```bash
 # 1) Simulate an end-of-call to create a case + token

@@ -10,6 +10,7 @@ import {
   generateIntakeToken,
   updateCase,
   getMissingFields,
+  flagPossibleDuplicate,
 } from './intakeService.js';
 import { sendIntakeFormEmail } from './emailService.js';
 import { redactSensitive } from '../config/intakeFields.js';
@@ -50,6 +51,9 @@ export async function processVapiEndOfCall(body = {}) {
 
   await upsertIntakeFields(theCase.id, fields, 'call');
 
+  // Flag a possible duplicate (same name as another client, different number).
+  const dup = await flagPossibleDuplicate(theCase.id, client);
+
   // Human-follow-up flag from the call.
   const humanFollowUp = fields.humanFollowUpNeeded === true || fields.humanFollowUpNeeded === 'true';
   if (humanFollowUp) await updateCase(theCase.id, { humanFollowUpNeeded: true });
@@ -76,6 +80,7 @@ export async function processVapiEndOfCall(body = {}) {
     callId: call.id,
     token,
     missingFields: await getMissingFields(theCase.id),
+    possibleDuplicate: dup,
     emailStatus: emailLog?.status ?? null,
   };
 }

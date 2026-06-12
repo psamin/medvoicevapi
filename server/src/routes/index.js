@@ -10,6 +10,7 @@ import vapiRouter from './vapi.js';
 import crmToolsRouter from './crmTools.js';
 import medvoiceVapiRouter from './medvoiceVapi.js';
 import medvoiceFormRouter from './medvoiceForm.js';
+import medvoiceDashboardRouter from './medvoiceDashboard.js';
 import { verifyVapiSecret } from '../vapi/verifySecret.js';
 
 export default function mountRoutes(app) {
@@ -28,6 +29,7 @@ export default function mountRoutes(app) {
   app.use('/api/tools', verifyVapiSecret, vapiToolsRouter);
   app.use('/api/intake', intakeRouter);
   app.use('/api/intake', medvoiceFormRouter);
+  app.use('/api/cases', medvoiceDashboardRouter);
   app.use('/api/prompts', promptsRouter);
   app.use('/api/vapi', vapiRouter);
   app.use('/api/debug', debugRouter); // POST /api/debug/reset, GET /api/debug/db

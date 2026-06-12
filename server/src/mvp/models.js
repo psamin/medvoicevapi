@@ -54,6 +54,8 @@ export function newCase(input = {}) {
     injurySummary: input.injurySummary ?? null,
     treatmentStatus: input.treatmentStatus ?? null,
     humanFollowUpNeeded: input.humanFollowUpNeeded ?? false,
+    possibleDuplicate: input.possibleDuplicate ?? false,
+    duplicateOfClientId: input.duplicateOfClientId ?? null,
     createdAt: input.createdAt || ts,
     updatedAt: ts,
   };
