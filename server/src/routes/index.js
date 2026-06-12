@@ -8,15 +8,16 @@ import intakeRouter from './intake.js';
 import promptsRouter from './prompts.js';
 import vapiRouter from './vapi.js';
 import crmToolsRouter from './crmTools.js';
+import { verifyVapiSecret } from '../vapi/verifySecret.js';
 
 export default function mountRoutes(app) {
   // ---- canonical Vapi CRM tools (snake_case, paste these into Vapi) ----
-  app.use('/tools', crmToolsRouter);
+  app.use('/tools', verifyVapiSecret, crmToolsRouter);
 
   // ---- Vapi CRM API + earlier camelCase tools ----
   app.use('/api/leads', leadsRouter);
   app.use('/api/calls', callsRouter);
-  app.use('/api/tools', vapiToolsRouter);
+  app.use('/api/tools', verifyVapiSecret, vapiToolsRouter);
   app.use('/api/intake', intakeRouter);
   app.use('/api/prompts', promptsRouter);
   app.use('/api/vapi', vapiRouter);

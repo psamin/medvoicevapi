@@ -41,7 +41,11 @@ export function sendToolResult(res, call, payload, status = 200) {
 export function toolHandler(name, fn) {
   return async (req, res) => {
     const call = extractToolCall(req.body);
-    console.log(`[vapi-tool] ${name}`, JSON.stringify(call.args));
+    // Safe logging: log the tool name + which fields were provided, NOT the values
+    // (they contain caller PII). Set LOG_TOOL_ARGS=true to log full args for debugging.
+    const keys = Object.keys(call.args || {});
+    console.log(`[vapi-tool] ${name} fields=[${keys.join(',')}]`);
+    if (process.env.LOG_TOOL_ARGS === 'true') console.log(`  args: ${JSON.stringify(call.args)}`);
     try {
       const { payload, status = 200 } = (await fn(call.args, call)) ?? { payload: {} };
       sendToolResult(res, call, { ok: true, tool: name, ...payload }, status);
