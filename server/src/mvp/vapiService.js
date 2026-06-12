@@ -2,6 +2,7 @@
 // emailed intake form, and place outbound TEST calls through Vapi (no Twilio).
 import repo from './repo.js';
 import { newIntakeCall, CASE_STATUS } from './models.js';
+import { isOptedOut, normalizePhoneNumber } from './optOut.js';
 import {
   createOrUpdateClient,
   createOrUpdateCase,
@@ -82,6 +83,14 @@ export async function processVapiEndOfCall(body = {}) {
 // Outbound TEST call through Vapi only (no Twilio). Dry-runs unless configured.
 export async function triggerVapiOutboundTestCall({ phone, caseId = null } = {}) {
   if (!phone) throw new Error('phone is required');
+
+  // Pre-dial opt-out / do-not-call check — never dial an opted-out number, and
+  // do NOT treat this as a failed call. Runs before dry-run and real dialing.
+  if (await isOptedOut(phone)) {
+    console.warn(`[vapi-call] BLOCKED outbound to ${normalizePhoneNumber(phone)} — number has opted out`);
+    return { skipped: true, reason: 'opted_out', message: 'This number has opted out of calls.', phone, caseId };
+  }
+
   const dryRun = process.env.DRY_RUN_VAPI_CALLS !== 'false' || !process.env.VAPI_API_KEY;
 
   if (dryRun) {
