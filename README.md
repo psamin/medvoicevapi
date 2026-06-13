@@ -17,6 +17,74 @@ so they can complete the missing information.
 - **Emails** the form link to the client after the call (SendGrid, or dry-run logging).
 - Supports a basic **reminder** email and **dry-run modes** for email and Vapi calls.
 
+## Setup
+
+> **Prompt management is config-as-code (industry standard).** The two Vapi prompts
+> live in this repo as the single source of truth and are deployed to the Vapi
+> assistant via the API with `npm run sync:assistant`. **Don't hand-edit the prompt in
+> the Vapi dashboard** — it will drift from the repo and be overwritten on the next sync.
+
+### Prerequisites
+- Node.js ≥ 18, a [Vapi](https://dashboard.vapi.ai) account, and (for phone calls /
+  saving call data) [`ngrok`](https://ngrok.com). Vapi provides the transcriber
+  (Deepgram), model (OpenAI), and voice — no ElevenLabs/OpenAI/Deepgram keys in this repo.
+
+### 1. Install & configure env
+```bash
+cd server && npm install && cp .env.example .env
+cd ../frontend && npm install
+```
+Fill `server/.env` (from the Vapi dashboard → **API Keys / Assistants / Phone Numbers**):
+| Var | Value |
+|---|---|
+| `VAPI_API_KEY` | **private** key (server-only) |
+| `VAPI_PUBLIC_KEY` | **public** key (browser web-call test) |
+| `VAPI_ASSISTANT_ID` | your assistant's id (or use `--create` in step 3) |
+| `VAPI_PHONE_NUMBER_ID` | a number provisioned in Vapi |
+| `VAPI_WEBHOOK_SECRET` | any random string (sync pushes it to Vapi for you) |
+| `WEBHOOK_BASE_URL` | your ngrok https URL (step 4) |
+
+### 2. The two Vapi prompts (in this repo)
+These are the only two prompts the assistant needs. They're deployed by the sync
+command in step 3 — or paste them into the dashboard manually as a one-time fallback.
+
+**First Message** — [`prompts/vapi-mvp-inbound-first-message.md`](prompts/vapi-mvp-inbound-first-message.md):
+```
+Thanks for calling MedVoice. I'm an AI assistant for the intake team — I can take down a few basic details about your potential injury case so the team can follow up. Is now a good time to go through a few quick questions?
+```
+
+**System Prompt** — [`prompts/vapi-mvp-intake-agent.md`](prompts/vapi-mvp-intake-agent.md):
+the full inbound intake prompt (identity, guardrails, the field-collection order, and
+tool usage). Open the file for the canonical text. *(Opt-out is outbound-only — the
+outbound opener + system prompt live in `prompts/vapi-mvp-opening-line.md` and
+`prompts/vapi-mvp-outbound-test-agent.md`.)*
+
+### 3. Create / sync the assistant
+```bash
+cd server
+npm run sync:assistant -- --create   # first time → creates the assistant, prints its id (paste into .env)
+npm run sync:assistant               # thereafter → deploys the prompt files to that assistant
+```
+In the dashboard, set **Transcriber: Deepgram · Model: OpenAI · Voice: built-in** (one-time).
+
+### 4. Expose the server (for phone calls + dashboard data)
+```bash
+cd server && npm run dev          # terminal 1 → http://localhost:3001
+ngrok http 3001                   # terminal 2 → copy the https URL into WEBHOOK_BASE_URL
+npm run sync:assistant            # re-run so Vapi gets the webhook URL + tools + secret
+cd ../frontend && npm run dev      # terminal 3 → http://localhost:3000
+```
+
+### 5. Bind the number for inbound (one-time, dashboard)
+Vapi → **Phone Numbers → your number → Inbound Settings → Assistant** = your assistant.
+
+### 6. Test & view
+- **Web call:** http://localhost:3000/vapi → Start.
+- **Phone call:** dial your Vapi number.
+- **Results:** http://localhost:3000/dashboard (auto-refreshes after the call ends).
+
+Full details and troubleshooting: [docs/medvoice-mvp.md](docs/medvoice-mvp.md).
+
 ## System Overview
 
 ```mermaid
