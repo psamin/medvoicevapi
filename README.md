@@ -175,11 +175,13 @@ A 5-step form. Step 4 is **conditional on accident type**.
 
 ## Data Model Overview
 
-- **Client** — basic contact info + language/contact preferences.
-- **Case** — accident, injury, status, and case-level fields; holds the form token.
-- **IntakeField** — normalized per-field value with `source`, `status`, `confidence`, and client-facing/staff-only flags.
-- **Call** (`intakeCalls`) — Vapi call metadata: id, direction, transcript, summary, recording link.
-- **EmailLog** — each form/reminder email attempt and its status.
+Stored in SQLite (default) behind the repository:
+- **Client** — contact info + language/contact preferences.
+- **Case** — accident/injury fields, status, form token, and follow-up tracking (`followUpAttemptCount`, `lastFollowUpAt`, `followUpStartedAt`, `formSentAt`, `completedAt`).
+- **IntakeField** — normalized per-field value with `source` (call/form/staff), `status`, and client-facing/staff-only flags.
+- **RequiredDocument** — per-case document checklist with `status` (pending/received) and `uploadedFileUrl`.
+- **IntakeCall** — Vapi call metadata: direction, transcript, summary, recording link.
+- **EmailLog** — each form/confirmation/reminder email attempt and its status.
 
 ## Field Source Tracking
 
@@ -230,32 +232,34 @@ is missing or `DRY_RUN_EMAILS=true`, emails are logged instead of sent.
 ## Current MVP Scope (implemented)
 
 - Vapi voice intake agent (prompts + inbound webhook handling)
-- Vapi event / end-of-call processing
-- CRM / intake field storage (local JSON dev store by default)
-- Prefilled 5-step client intake form
-- Emailing the form link (SendGrid or dry-run)
-- Basic outbound Vapi test call + outbound opt-out / do-not-call handling
-- Duplicate detection: exact de-dupe by phone/email + **possible-duplicate flag** by name (flagged for review, never auto-merged)
-- Read-only **staff dashboard** (`/dashboard`) showing every case, fields by source, transcripts, emails, missing fields, and duplicate flags
-- Simple reminder email endpoint
+- Vapi event / end-of-call processing → saves to **SQLite** (source of truth)
+- Prefilled 5-step client intake form **+ document-upload requirements**
+- **Validation** of required fields **and** required documents → `complete` / `missing_info`
+- Emails: intake-form link, **confirmation** on complete, **reminders** during follow-up (SendGrid or dry-run)
+- **Follow-up workflow**: outbound call/email reminders, max 3, 24h apart, 3-day window, opt-out-aware, then `follow_up_exhausted` + case-manager flag
+- Outbound Vapi test call + outbound opt-out / do-not-call handling
+- Duplicate detection: exact de-dupe by phone/email + **possible-duplicate flag** by name (never auto-merged)
+- Read-only **staff dashboard** (`/dashboard`): cases, fields by source, documents, transcripts, emails, missing items, flags
 - Dry-run modes for email and Vapi calls
-- 37 automated checks (`npm test`)
+- 46 automated checks (`npm test`)
 
 ## ⚠️ Known Constraints (must change before production)
 
 These are intentional MVP shortcuts — the app works locally today, but each of
 these needs to change before any real/production use:
 
-- **Storage is a local JSON dev store.** Postgres scaffolding exists behind a
-  repository (`server/src/mvp/repo.js`, set `DATABASE_URL`) but is unused by default
-  and unverified against a live DB. **Future:** run on a managed Postgres (or at
-  least SQLite locally); migrate the legacy CRM collections and the opt-out store
-  onto the same DB so nothing lives in the JSON file.
+- **Storage is local SQLite** (`server/data/medvoice.db`, the source of truth).
+  Postgres is supported via `DATABASE_URL` but unverified against a live DB.
+  **Future:** run on a managed Postgres for production.
 - **No telephony provider integrated.** Calls go through Vapi only. **Future:**
   **Twilio integration** (import/port a real number, SMS reminders) — none of the
   Twilio path exists yet.
-- **Opt-out store lives in the JSON CRM layer**, not the MVP DB. **Future:** move it
-  onto the repo/Postgres path when storage is migrated.
+- **Document uploads are link/filename references**, not real file storage.
+  **Future:** real upload + object storage (S3/GCS) with validation.
+- **Opt-out store still lives in the JSON CRM layer**, not SQLite. **Future:** move
+  it onto the repo so all data shares one store.
+- **Follow-up runs on a manual `/api/follow-up/run` trigger.** **Future:** a
+  scheduler/cron (and the legacy CRM collections still use the JSON store).
 - **Email/calls default to dry-run** and the Vapi assistant is configured by hand in
   the dashboard (not provisioned by code).
 - **No auth, rate limiting, or audit logging**; single-process only.

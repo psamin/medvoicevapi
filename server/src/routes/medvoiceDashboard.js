@@ -7,12 +7,13 @@ import { getMissingFields } from '../mvp/intakeService.js';
 const router = Router();
 
 async function enrich(c) {
-  const [client, fields, calls, emails, missingFields] = await Promise.all([
+  const [client, fields, calls, emails, missingFields, documents] = await Promise.all([
     c.clientId ? repo.clients.findById(c.clientId) : null,
     repo.intakeFields.listByCase(c.id),
     repo.intakeCalls.listByCase(c.id),
     repo.emailLogs.listByCase(c.id),
     getMissingFields(c.id),
+    repo.requiredDocuments.listByCase(c.id),
   ]);
   const dup = c.duplicateOfClientId ? await repo.clients.findById(c.duplicateOfClientId) : null;
   return {
@@ -21,6 +22,7 @@ async function enrich(c) {
     fields: fields.map((f) => ({ key: f.fieldKey, label: f.fieldLabel, value: f.value, source: f.source, status: f.status })),
     calls: calls.map((v) => ({ id: v.id, direction: v.direction, status: v.status, summary: v.summary, transcript: v.transcript, recordingUrl: v.recordingUrl, createdAt: v.createdAt })),
     emails: emails.map((e) => ({ id: e.id, toEmail: e.toEmail, subject: e.subject, status: e.status, createdAt: e.createdAt })),
+    documents: documents.map((d) => ({ type: d.docType, label: d.label, required: d.required, status: d.status })),
     missingFields,
     duplicateOfClient: dup ? { id: dup.id, firstName: dup.firstName, lastName: dup.lastName, phone: dup.phone } : null,
   };

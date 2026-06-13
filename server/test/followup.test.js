@@ -36,12 +36,27 @@ async function missingInfoCase(phone = '+15551110000') {
 }
 const runAt = (nowIso) => post('/api/follow-up/run', { now: nowIso });
 
-test('complete submission -> status complete + confirmation email', async () => {
+const REQUIRED_DOCS = { government_id: 'id.jpg', insurance_information: 'ins.pdf' };
+
+test('complete submission (fields + required docs) -> complete + confirmation email', async () => {
   const r = await endOfCall(FULL);
-  const submit = await post(`/api/intake/${r.token}`, { fields: {} });
+  const submit = await post(`/api/intake/${r.token}`, { fields: {}, documents: REQUIRED_DOCS });
   assert.equal(submit.status, 'complete');
   const c = await caseById(r.caseId);
   assert.ok(c.emails.some((e) => e.subject === 'Your MedVoice intake is complete'), 'confirmation email sent');
+});
+
+test('required documents gate completion', async () => {
+  const r = await endOfCall(FULL); // all fields present, no docs yet
+  const form = await get(`/api/intake/${r.token}`);
+  assert.ok(form.documents.some((d) => d.type === 'government_id' && d.required), 'doc requirement on form');
+  // all fields but no docs -> still missing_info
+  const s1 = await post(`/api/intake/${r.token}`, { fields: {} });
+  assert.equal(s1.status, 'missing_info');
+  assert.ok(s1.missingDocuments.some((d) => d.type === 'insurance_information'));
+  // upload the required docs -> complete
+  const s2 = await post(`/api/intake/${r.token}`, { documents: REQUIRED_DOCS });
+  assert.equal(s2.status, 'complete');
 });
 
 test('incomplete submission -> status missing_info', async () => {
@@ -92,7 +107,7 @@ test('follow-up stops after the 3-day window even with attempts left', async () 
 
 test('complete intake stops all future follow-ups', async () => {
   const r = await endOfCall(FULL);
-  await post(`/api/intake/${r.token}`, { fields: {} }); // -> complete
+  await post(`/api/intake/${r.token}`, { fields: {}, documents: REQUIRED_DOCS }); // -> complete
   const results = await runAt(hoursFromNow(0)).then((x) => x.results);
   assert.equal(results.length, 0, 'completed case is not followed up');
 });

@@ -18,6 +18,7 @@ function emptyDb() {
     clients: [],
     cases: [],
     intakeFields: [],
+    requiredDocuments: [],
     intakeCalls: [],
     emailLogs: [],
     // ---- richer CRM model (first-call verbal intake; docs collected later) ----

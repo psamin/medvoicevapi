@@ -109,6 +109,20 @@ export function newIntakeCall(input = {}) {
   };
 }
 
+export function newRequiredDocument(input = {}) {
+  return {
+    id: input.id || genId('doc'),
+    caseId: input.caseId ?? null,
+    docType: input.docType,
+    label: input.label ?? input.docType,
+    required: input.required ?? false,
+    status: input.status ?? 'pending', // pending | received | waived
+    uploadedFileUrl: input.uploadedFileUrl ?? null,
+    uploadedAt: input.uploadedAt ?? null,
+    updatedAt: nowIso(),
+  };
+}
+
 export function newEmailLog(input = {}) {
   return {
     id: input.id || genId('email'),

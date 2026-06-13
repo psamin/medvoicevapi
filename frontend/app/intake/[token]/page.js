@@ -11,6 +11,7 @@ export default function IntakeForm({ params }) {
   const { token } = use(params);
   const [payload, setPayload] = useState(null);
   const [values, setValues] = useState({});
+  const [docValues, setDocValues] = useState({});
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(null);
@@ -24,6 +25,9 @@ export default function IntakeForm({ params }) {
       const v = {};
       for (const step of data.steps) for (const sec of step.sections) for (const f of sec.fields) v[f.key] = f.value ?? '';
       setValues(v);
+      const dv = {};
+      for (const d of data.documents || []) dv[d.type] = d.uploadedFileUrl ?? '';
+      setDocValues(dv);
     } catch (e) {
       setError(e.message);
     }
@@ -43,7 +47,7 @@ export default function IntakeForm({ params }) {
       const res = await fetch(`${API_BASE}/api/intake/${token}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ fields: values }),
+        body: JSON.stringify({ fields: values, documents: docValues }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Submit failed');
@@ -88,6 +92,30 @@ export default function IntakeForm({ params }) {
           ))}
         </section>
       ))}
+
+      {(payload.documents || []).length > 0 && (
+        <section style={s.step}>
+          <h2 style={s.stepTitle}>Documents</h2>
+          <p style={s.muted}>Paste a link or filename for each document you can provide.</p>
+          <div style={s.grid}>
+            {payload.documents.map((d) => (
+              <label key={d.type} style={s.label}>
+                <span>
+                  {d.label}{d.required && <span style={{ color: '#c0392b' }}> *</span>}
+                  {d.status === 'received' ? <em style={{ color: '#1b7a3d' }}> ✓ received</em> : null}
+                </span>
+                <input
+                  type="text"
+                  placeholder="link or filename"
+                  value={docValues[d.type] ?? ''}
+                  onChange={(e) => { setDocValues((p) => ({ ...p, [d.type]: e.target.value })); setSavedMsg(null); }}
+                  style={s.input}
+                />
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
       {savedMsg && <p style={s.saved}>{savedMsg}</p>}
       <button onClick={submit} disabled={saving} style={s.btn}>{saving ? 'Saving…' : 'Save my information'}</button>

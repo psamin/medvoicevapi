@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS intake_fields (
 );
 CREATE INDEX IF NOT EXISTS intake_fields_case_idx ON intake_fields (case_id);
 
+CREATE TABLE IF NOT EXISTS required_documents (
+  id          TEXT PRIMARY KEY,
+  case_id     TEXT NOT NULL,
+  doc_type    TEXT NOT NULL,
+  doc         JSONB NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (case_id, doc_type)
+);
+CREATE INDEX IF NOT EXISTS required_documents_case_idx ON required_documents (case_id);
+
 CREATE TABLE IF NOT EXISTS intake_calls (
   id          TEXT PRIMARY KEY,
   case_id     TEXT,

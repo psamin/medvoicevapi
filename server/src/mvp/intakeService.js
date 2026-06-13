@@ -3,7 +3,7 @@
 // All persistence goes through repo.js (Postgres or JSON dev store), so these
 // functions are async regardless of backend.
 import repo from './repo.js';
-import { newClient, newCase, newIntakeField, genToken, CASE_STATUS } from './models.js';
+import { newClient, newCase, newIntakeField, newRequiredDocument, genToken, CASE_STATUS } from './models.js';
 import {
   getFieldConfig,
   isKnownField,
@@ -11,6 +11,7 @@ import {
   isFieldVisible,
   INTAKE_FIELDS,
 } from '../config/intakeFields.js';
+import { REQUIRED_DOCUMENTS, REQUIRED_DOC_TYPES, getDocConfig } from '../config/documents.js';
 
 const isAnswered = (v) => v !== null && v !== undefined && v !== '';
 const nowIso = () => new Date().toISOString();
@@ -46,7 +47,44 @@ export async function createOrUpdateCase(clientId, data = {}) {
   if (open) {
     return repo.cases.save({ ...open, ...patch, updatedAt: nowIso() });
   }
-  return repo.cases.save(newCase({ clientId, status: CASE_STATUS.IN_PROGRESS, ...patch }));
+  const created = await repo.cases.save(newCase({ clientId, status: CASE_STATUS.IN_PROGRESS, ...patch }));
+  await seedRequiredDocuments(created.id);
+  return created;
+}
+
+/* ── Documents ── */
+// Seed the document checklist for a case (idempotent).
+export async function seedRequiredDocuments(caseId) {
+  for (const d of REQUIRED_DOCUMENTS) {
+    const existing = await repo.requiredDocuments.findByCaseAndType(caseId, d.type);
+    if (!existing) {
+      await repo.requiredDocuments.save(newRequiredDocument({ caseId, docType: d.type, label: d.label, required: d.required }));
+    }
+  }
+}
+
+export async function listDocuments(caseId) {
+  return repo.requiredDocuments.listByCase(caseId);
+}
+
+// Record an uploaded document (client form). url can be a filename/URL placeholder.
+export async function recordDocumentUpload(caseId, docType, url) {
+  const cfg = getDocConfig(docType);
+  if (!cfg) return null; // ignore unknown document types
+  const existing = (await repo.requiredDocuments.findByCaseAndType(caseId, docType)) ||
+    newRequiredDocument({ caseId, docType, label: cfg.label, required: cfg.required });
+  return repo.requiredDocuments.save({
+    ...existing, status: 'received', uploadedFileUrl: url ?? existing.uploadedFileUrl ?? 'uploaded', uploadedAt: nowIso(), updatedAt: nowIso(),
+  });
+}
+
+// Required documents not yet received.
+export async function getMissingDocuments(caseId) {
+  const docs = await repo.requiredDocuments.listByCase(caseId);
+  const byType = new Map(docs.map((d) => [d.docType, d]));
+  return REQUIRED_DOC_TYPES
+    .filter((t) => (byType.get(t)?.status ?? 'pending') !== 'received')
+    .map((t) => ({ type: t, label: getDocConfig(t)?.label ?? t }));
 }
 
 export async function getCase(caseId) {
@@ -185,6 +223,10 @@ export async function generatePrefilledFormPayload(token) {
     });
   }
 
+  const documents = (await repo.requiredDocuments.listByCase(theCase.id)).map((d) => ({
+    type: d.docType, label: d.label, required: d.required, status: d.status, uploadedFileUrl: d.uploadedFileUrl,
+  }));
+
   return {
     token,
     caseId: theCase.id,
@@ -192,6 +234,8 @@ export async function generatePrefilledFormPayload(token) {
     accidentType: theCase.accidentType,
     client: client ? { firstName: client.firstName, lastName: client.lastName, email: client.email } : null,
     missingFields: await getMissingFields(theCase.id),
+    missingDocuments: await getMissingDocuments(theCase.id),
+    documents,
     steps,
   };
 }
@@ -202,6 +246,7 @@ export async function recomputeCaseStatus(caseId) {
   if (!theCase) return null;
   if (theCase.humanFollowUpNeeded) return updateCase(caseId, { status: CASE_STATUS.CASE_MANAGER_REVIEW });
   const missing = await getMissingFields(caseId);
-  if (missing.length) return updateCase(caseId, { status: CASE_STATUS.MISSING_INFO });
+  const missingDocs = await getMissingDocuments(caseId);
+  if (missing.length || missingDocs.length) return updateCase(caseId, { status: CASE_STATUS.MISSING_INFO });
   return updateCase(caseId, { status: CASE_STATUS.COMPLETE, completedAt: new Date().toISOString() });
 }

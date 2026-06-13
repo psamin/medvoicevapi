@@ -73,6 +73,19 @@ const jsonRepo = {
       return rec;
     },
   },
+  requiredDocuments: {
+    async findByCaseAndType(caseId, docType) {
+      return jFind('requiredDocuments', (r) => r.caseId === caseId && r.docType === docType);
+    },
+    async listByCase(caseId) {
+      return jFilter('requiredDocuments', (r) => r.caseId === caseId);
+    },
+    async save(rec) {
+      if (jFind('requiredDocuments', (r) => r.id === rec.id)) jUpdate('requiredDocuments', (r) => r.id === rec.id, rec);
+      else jInsert('requiredDocuments', rec);
+      return rec;
+    },
+  },
   intakeCalls: {
     async insert(rec) { return jInsert('intakeCalls', rec); },
     async listByCase(caseId) { return jFilter('intakeCalls', (r) => r.caseId === caseId); },
@@ -152,6 +165,22 @@ const pgRepo = {
         `INSERT INTO intake_fields (id, case_id, field_key, doc, updated_at) VALUES ($1,$2,$3,$4,now())
          ON CONFLICT (id) DO UPDATE SET case_id=EXCLUDED.case_id, field_key=EXCLUDED.field_key, doc=EXCLUDED.doc, updated_at=now()`,
         [rec.id, rec.caseId, rec.fieldKey, rec]
+      );
+      return rec;
+    },
+  },
+  requiredDocuments: {
+    async findByCaseAndType(caseId, docType) {
+      return one(await query('SELECT doc FROM required_documents WHERE case_id=$1 AND doc_type=$2', [caseId, docType]));
+    },
+    async listByCase(caseId) {
+      return (await query('SELECT doc FROM required_documents WHERE case_id=$1', [caseId])).rows.map((r) => r.doc);
+    },
+    async save(rec) {
+      await query(
+        `INSERT INTO required_documents (id, case_id, doc_type, doc, updated_at) VALUES ($1,$2,$3,$4,now())
+         ON CONFLICT (id) DO UPDATE SET case_id=EXCLUDED.case_id, doc_type=EXCLUDED.doc_type, doc=EXCLUDED.doc, updated_at=now()`,
+        [rec.id, rec.caseId, rec.docType, rec]
       );
       return rec;
     },
@@ -242,6 +271,21 @@ const sqliteRepo = {
         `INSERT INTO intake_fields (id,case_id,field_key,doc,updated_at) VALUES (?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET case_id=excluded.case_id, field_key=excluded.field_key, doc=excluded.doc, updated_at=excluded.updated_at`
       ).run(rec.id, rec.caseId, rec.fieldKey, JSON.stringify(rec), NOW());
+      return rec;
+    },
+  },
+  requiredDocuments: {
+    async findByCaseAndType(caseId, docType) {
+      return sdoc(getDb().prepare('SELECT doc FROM required_documents WHERE case_id=? AND doc_type=?').get(caseId, docType));
+    },
+    async listByCase(caseId) {
+      return getDb().prepare('SELECT doc FROM required_documents WHERE case_id=?').all(caseId).map((r) => JSON.parse(r.doc));
+    },
+    async save(rec) {
+      getDb().prepare(
+        `INSERT INTO required_documents (id,case_id,doc_type,doc,updated_at) VALUES (?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET case_id=excluded.case_id, doc_type=excluded.doc_type, doc=excluded.doc, updated_at=excluded.updated_at`
+      ).run(rec.id, rec.caseId, rec.docType, JSON.stringify(rec), NOW());
       return rec;
     },
   },

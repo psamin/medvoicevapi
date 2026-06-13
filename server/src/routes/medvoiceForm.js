@@ -8,6 +8,8 @@ import {
   upsertIntakeFields,
   recomputeCaseStatus,
   getMissingFields,
+  getMissingDocuments,
+  recordDocumentUpload,
 } from '../mvp/intakeService.js';
 import { sendSimpleReminderEmail, sendConfirmationEmail } from '../mvp/emailService.js';
 import { CASE_STATUS } from '../mvp/models.js';
@@ -42,6 +44,15 @@ router.post('/:token', async (req, res) => {
   );
 
   await upsertIntakeFields(theCase.id, fields, 'form');
+
+  // Document uploads: { documents: [{type, uploadedFileUrl}] } or { documents: {type: url} }.
+  const docs = req.body?.documents;
+  if (Array.isArray(docs)) {
+    for (const d of docs) await recordDocumentUpload(theCase.id, d.type, d.uploadedFileUrl ?? d.url);
+  } else if (docs && typeof docs === 'object') {
+    for (const [type, url] of Object.entries(docs)) await recordDocumentUpload(theCase.id, type, url);
+  }
+
   const updated = await recomputeCaseStatus(theCase.id);
   // Confirmation email only when the submission completes the intake.
   if (updated.status === CASE_STATUS.COMPLETE) await sendConfirmationEmail(theCase.id);
@@ -50,6 +61,7 @@ router.post('/:token', async (req, res) => {
     caseId: theCase.id,
     status: updated.status,
     missingFields: await getMissingFields(theCase.id),
+    missingDocuments: await getMissingDocuments(theCase.id),
   });
 });
 
