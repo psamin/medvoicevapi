@@ -128,9 +128,10 @@ function Section({ title, children }) {
 }
 
 function statusTone(status) {
-  if (status === 'completed') return { background: '#d4f4dd', color: '#1b7a3d' };
-  if (status === 'human_follow_up_needed') return { background: '#fde2e1', color: '#b3261e' };
-  if (status === 'waiting_on_client') return { background: '#fef3cd', color: '#8a6d00' };
+  if (status === 'complete') return { background: '#d4f4dd', color: '#1b7a3d' };
+  if (status === 'case_manager_review') return { background: '#fde2e1', color: '#b3261e' };
+  if (status === 'follow_up_exhausted') return { background: '#f5d0d0', color: '#7a1f1f' };
+  if (status === 'missing_info') return { background: '#fef3cd', color: '#8a6d00' };
   return { background: '#e9ecef', color: '#495057' };
 }
 function sourceTone(src) {

@@ -48,7 +48,7 @@ export default function IntakeForm({ params }) {
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Submit failed');
       setSavedMsg(
-        data.status === 'completed'
+        data.status === 'complete'
           ? 'All set — your intake is complete. Thank you!'
           : `Saved. ${data.missingFields.length} item(s) still needed; you can finish anytime.`
       );

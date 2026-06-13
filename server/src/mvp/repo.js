@@ -11,7 +11,7 @@ import {
   normalizePhone,
 } from '../db/mockDb.js';
 
-const OPEN_EXCLUDED = ['closed', 'completed'];
+const OPEN_EXCLUDED = ['complete', 'closed', 'follow_up_exhausted'];
 const norm = (s) => (s ? String(s).trim().toLowerCase() : '');
 
 /* ───────────────────────── JSON backend ───────────────────────── */

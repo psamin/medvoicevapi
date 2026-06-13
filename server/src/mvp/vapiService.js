@@ -68,7 +68,8 @@ export async function processVapiEndOfCall(body = {}) {
 
   const token = await generateIntakeToken(theCase.id);
   await updateCase(theCase.id, {
-    status: humanFollowUp ? CASE_STATUS.HUMAN_FOLLOW_UP_NEEDED : CASE_STATUS.INTAKE_FORM_SENT,
+    status: humanFollowUp ? CASE_STATUS.CASE_MANAGER_REVIEW : CASE_STATUS.FORM_SENT,
+    formSentAt: new Date().toISOString(),
   });
 
   const emailLog = await sendIntakeFormEmail(theCase.id);

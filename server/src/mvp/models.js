@@ -15,12 +15,19 @@ const nowIso = () => new Date().toISOString();
 
 export const CASE_STATUS = {
   NEW: 'new',
-  INTAKE_IN_PROGRESS: 'intake_in_progress',
-  INTAKE_FORM_SENT: 'intake_form_sent',
-  WAITING_ON_CLIENT: 'waiting_on_client',
-  COMPLETED: 'completed',
-  HUMAN_FOLLOW_UP_NEEDED: 'human_follow_up_needed',
-  CLOSED: 'closed',
+  IN_PROGRESS: 'in_progress',
+  FORM_SENT: 'form_sent',
+  MISSING_INFO: 'missing_info',
+  COMPLETE: 'complete',
+  FOLLOW_UP_EXHAUSTED: 'follow_up_exhausted',
+  CASE_MANAGER_REVIEW: 'case_manager_review',
+};
+
+// Follow-up workflow guardrails.
+export const FOLLOW_UP = {
+  MAX_ATTEMPTS: 3,
+  INTERVAL_HOURS: 24,
+  WINDOW_DAYS: 3,
 };
 
 export function newClient(input = {}) {
@@ -56,6 +63,13 @@ export function newCase(input = {}) {
     humanFollowUpNeeded: input.humanFollowUpNeeded ?? false,
     possibleDuplicate: input.possibleDuplicate ?? false,
     duplicateOfClientId: input.duplicateOfClientId ?? null,
+    // --- follow-up workflow tracking ---
+    formSentAt: input.formSentAt ?? null,
+    completedAt: input.completedAt ?? null,
+    followUpStartedAt: input.followUpStartedAt ?? null,
+    followUpExhaustedAt: input.followUpExhaustedAt ?? null,
+    followUpAttemptCount: input.followUpAttemptCount ?? 0,
+    lastFollowUpAt: input.lastFollowUpAt ?? null,
     createdAt: input.createdAt || ts,
     updatedAt: ts,
   };

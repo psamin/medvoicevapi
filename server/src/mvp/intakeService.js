@@ -46,7 +46,7 @@ export async function createOrUpdateCase(clientId, data = {}) {
   if (open) {
     return repo.cases.save({ ...open, ...patch, updatedAt: nowIso() });
   }
-  return repo.cases.save(newCase({ clientId, status: CASE_STATUS.INTAKE_IN_PROGRESS, ...patch }));
+  return repo.cases.save(newCase({ clientId, status: CASE_STATUS.IN_PROGRESS, ...patch }));
 }
 
 export async function getCase(caseId) {
@@ -200,9 +200,8 @@ export async function generatePrefilledFormPayload(token) {
 export async function recomputeCaseStatus(caseId) {
   const theCase = await repo.cases.findById(caseId);
   if (!theCase) return null;
-  if (theCase.humanFollowUpNeeded) return updateCase(caseId, { status: CASE_STATUS.HUMAN_FOLLOW_UP_NEEDED });
+  if (theCase.humanFollowUpNeeded) return updateCase(caseId, { status: CASE_STATUS.CASE_MANAGER_REVIEW });
   const missing = await getMissingFields(caseId);
-  return updateCase(caseId, {
-    status: missing.length ? CASE_STATUS.WAITING_ON_CLIENT : CASE_STATUS.COMPLETED,
-  });
+  if (missing.length) return updateCase(caseId, { status: CASE_STATUS.MISSING_INFO });
+  return updateCase(caseId, { status: CASE_STATUS.COMPLETE, completedAt: new Date().toISOString() });
 }
