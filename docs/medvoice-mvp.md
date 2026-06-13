@@ -39,9 +39,13 @@ cp server/.env.example server/.env           # fill in when you have keys
 cd server && npm test                         # 28 tests, all dry-run (JSON store)
 ```
 
-## Storage: Postgres or JSON
+## Storage: SQLite (default), Postgres, or JSON
 Storage is pluggable behind `server/src/mvp/repo.js`:
-- **JSON dev store (default):** no setup; data persists to `server/data/mock-db.json`. Used by tests.
+- **SQLite (default, source of truth):** no setup — the schema auto-creates at
+  `SQLITE_PATH` (`server/data/medvoice.db`). Uses Node's built-in `node:sqlite`
+  (the `--experimental-sqlite` flag is baked into `npm run dev`/`start`/`test`).
+  Tests run against an in-memory SQLite (`SQLITE_PATH=:memory:`).
+- **JSON dev store:** set `STORAGE=json` (legacy/escape hatch; `server/data/mock-db.json`).
 - **Postgres:** set `DATABASE_URL` in `server/.env`, then:
   ```bash
   cd server

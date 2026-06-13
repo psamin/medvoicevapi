@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+process.env.SQLITE_PATH = ':memory:';
 process.env.MOCK_DB_PATH = join(tmpdir(), `medvoice-optout-${process.pid}.json`);
 const { default: app } = await import('../src/app.js');
 const { normalizePhoneNumber } = await import('../src/mvp/optOut.js');

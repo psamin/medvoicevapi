@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+process.env.SQLITE_PATH = ':memory:';
 process.env.MOCK_DB_PATH = join(tmpdir(), `medvoice-crm-e2e-${process.pid}.json`);
 const { default: app } = await import('../src/app.js');
 
