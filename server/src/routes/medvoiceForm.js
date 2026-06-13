@@ -9,7 +9,8 @@ import {
   recomputeCaseStatus,
   getMissingFields,
 } from '../mvp/intakeService.js';
-import { sendSimpleReminderEmail } from '../mvp/emailService.js';
+import { sendSimpleReminderEmail, sendConfirmationEmail } from '../mvp/emailService.js';
+import { CASE_STATUS } from '../mvp/models.js';
 import { STAFF_ONLY_FIELD_KEYS } from '../config/intakeFields.js';
 
 const router = Router();
@@ -42,6 +43,8 @@ router.post('/:token', async (req, res) => {
 
   await upsertIntakeFields(theCase.id, fields, 'form');
   const updated = await recomputeCaseStatus(theCase.id);
+  // Confirmation email only when the submission completes the intake.
+  if (updated.status === CASE_STATUS.COMPLETE) await sendConfirmationEmail(theCase.id);
   res.json({
     ok: true,
     caseId: theCase.id,

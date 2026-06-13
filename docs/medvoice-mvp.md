@@ -95,6 +95,18 @@ and the `upsert-intake-fields` / `get-missing-fields` tools (with `VAPI_WEBHOOK_
 Edit a prompt file → commit → re-run sync. Don't hand-edit the dashboard prompt (drift).
 The `/vapi` web page uses the deployed assistant as-is (no override).
 
+## Follow-up workflow
+When a client submits an incomplete form the case becomes `missing_info` and enters
+the follow-up workflow. Trigger a tick (cron/queue in production) with:
+```bash
+curl -X POST http://localhost:3001/api/follow-up/run    # optional body { "now": "<ISO>" } to simulate time
+```
+Per tick, for each `missing_info` case it sends one outbound call + email reminder,
+**capped at 3 attempts, ≥24h apart, within a 3-day window, never to an opted-out
+client**. After 3 attempts or the 3-day window it stops, sets `follow_up_exhausted`,
+and flags the case for case-manager review. A complete submission sends a
+**confirmation email** and stops all follow-ups.
+
 ## Opt-out handling (outbound only)
 Opt-out is an **outbound-only** concern — the inbound intake prompt has no opt-out
 step (an inbound caller dialed in; they're not on an outbound list).

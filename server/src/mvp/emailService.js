@@ -77,6 +77,19 @@ export async function sendIntakeFormEmail(caseId) {
   return deliver({ caseId, toEmail: client?.email, subject, body });
 }
 
+// Confirmation email — sent only once all required fields + documents are complete.
+export async function sendConfirmationEmail(caseId) {
+  const theCase = await getCase(caseId);
+  if (!theCase) throw new Error(`case not found: ${caseId}`);
+  const client = theCase.clientId ? await getClient(theCase.clientId) : null;
+  const subject = 'Your MedVoice intake is complete';
+  const body =
+    `Hi${client?.firstName ? ` ${client.firstName}` : ''},\n\n` +
+    `Thank you — we've received your completed intake. A case manager will review it ` +
+    `and follow up with you about next steps.\n\nThank you,\nThe MedVoice Intake Team`;
+  return deliver({ caseId, toEmail: client?.email, subject, body });
+}
+
 // Basic reminder when required fields remain (no scheduling logic in this MVP).
 export async function sendSimpleReminderEmail(caseId) {
   const theCase = await getCase(caseId);
