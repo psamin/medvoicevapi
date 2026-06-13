@@ -85,53 +85,60 @@ Vapi → **Phone Numbers → your number → Inbound Settings → Assistant** = 
 
 Full details and troubleshooting: [docs/medvoice-mvp.md](docs/medvoice-mvp.md).
 
-## System Overview
+## System Design
 
 ```mermaid
 flowchart TD
-    A[Client / Caller] --> B[Vapi Voice Agent]
-    B --> C[MedVoice Backend - Express]
-    C --> D[(CRM / Intake Storage - JSON dev DB)]
-    C --> E[Intake Field Config]
-    C --> F[Client Intake Form - Next.js]
-    C --> G[Email Service]
-    G --> H[Client Email Inbox]
-    H --> F
-    F --> C
-    C --> I[Vapi Outbound Test Call]
-    I --> A
+    A[Client calls inbound number] --> B[AI Voice Agent conducts intake]
+    B --> C[Backend receives structured intake data]
+    C --> D[(SQLite Database)]
+
+    D --> E[Generate intake form]
+    E --> F[Pre-fill collected fields]
+    E --> G[Show empty missing fields]
+    E --> H[Show missing document upload requirements]
+
+    F --> I[Email intake form to client]
+    G --> I
+    H --> I
+
+    I --> J[Client submits completed form and uploads documents]
+    J --> K[Backend validates required fields and documents]
+
+    K -->|Complete| L[Mark intake complete]
+    L --> M[Send confirmation email]
+    M --> N[Notify client: case manager will follow up]
+
+    K -->|Still missing info| O[Mark intake missing_info]
+    O --> P[Start follow-up workflow]
+
+    P --> Q{Attempts < 3 and within 3 days?}
+    Q -->|Yes| R[Wait 24 hours]
+    R --> S[Send outbound call reminder]
+    S --> T[Send email reminder]
+    T --> U[Client resubmits intake form]
+    U --> K
+
+    Q -->|No| V[Stop automated outreach]
+    V --> W[Mark follow_up_exhausted]
+    W --> X[Flag for case manager review]
 ```
 
-- **Vapi Voice Agent** — runs the conversation: telephony, transcription (Deepgram), model (OpenAI), and the voice. Calls the backend via webhooks/tools.
-- **MedVoice Backend** (`server/`, Express/ESM) — receives Vapi events, runs the intake services, serves the form API, sends email, and triggers outbound test calls.
-- **CRM / Intake Storage** — pluggable behind a repository (`server/src/mvp/repo.js`): **Postgres** when `DATABASE_URL` is set (`server/src/db/pg.js` + `schema.sql`, `npm run migrate`), or a **JSON file dev store** (`server/src/db/mockDb.js`) with zero setup otherwise. Entities: clients, cases, intakeFields, intakeCalls, emailLogs.
-- **Intake Field Config** (`server/src/config/intakeFields.js`) — single source of truth for the 5-step form, what the call prioritizes, and required/conditional/staff-only/sensitive rules.
-- **Client Intake Form** (`frontend/app/intake/[token]/page.js`) — the prefilled, token-secured 5-step form.
-- **Email Service** (`server/src/mvp/emailService.js`) — SendGrid via REST, or dry-run.
-- **Outbound Vapi Call** (`server/src/mvp/vapiService.js`) — places a Vapi test call (dry-run by default).
+- **AI Voice Agent (Vapi)** — runs the call (Deepgram transcription, OpenAI model, voice) and saves intake data to the backend via tools + the end-of-call webhook.
+- **Backend** (`server/`, Express/ESM) — persists intake data, generates the unified form, validates required fields/documents, sends email, and runs the follow-up workflow.
+- **SQLite database** — the **source of truth** for local/dev (`server/data/medvoice.db`). JSON is only used for payloads/logging, never as the store. (Postgres is supported via `DATABASE_URL` for production.)
+- **Intake form** (`frontend/app/intake/[token]/page.js`) — one unified, token-secured form: prefilled fields, empty missing fields, and document-upload requirements.
+- **Follow-up workflow** — outbound call/email reminders, capped at 3 attempts over 3 days, 24h apart, never to opted-out clients.
 
-## End-to-End Flow
+## Intake Status Lifecycle
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Vapi as Vapi Voice Agent
-    participant Backend as MedVoice Backend
-    participant CRM as CRM / Intake Store
-    participant Email as Email Service
-    participant Form as Intake Form
-
-    Client->>Vapi: Intake phone call
-    Vapi->>Client: AI disclosure + intake questions
-    Vapi->>Backend: Call events / end-of-call report
-    Backend->>CRM: Save client, case, call, transcript, fields (source=call)
-    Backend->>Backend: Generate secure intake form token
-    Backend->>Email: Send intake form link
-    Email->>Client: Intake form email (dry-run logged if no key)
-    Client->>Form: Opens prefilled form
-    Form->>Backend: Submit missing fields (source=form)
-    Backend->>CRM: Update intake record + recompute status
-```
+- `new` — intake started but not yet processed
+- `in_progress` — voice agent is collecting information
+- `form_sent` — intake form was generated and sent to the client
+- `missing_info` — client submitted the form but required fields or documents are still missing
+- `complete` — all required fields and documents are complete
+- `follow_up_exhausted` — system attempted 3 follow-ups over 3 days and stopped automated outreach
+- `case_manager_review` — intake needs human review or manual follow-up
 
 ## Call Intake Flow
 
@@ -156,21 +163,6 @@ flowchart LR
 Prompts: `prompts/vapi-mvp-opening-line.md`, `prompts/vapi-mvp-intake-agent.md`,
 `prompts/vapi-mvp-outbound-test-agent.md`.
 
-## Intake Form Flow
-
-The form is generated after the call, prefilled from call-collected data. The client
-completes what's missing; submissions update the same case record. Staff-only fields
-are hidden, and the conditional Step 4 module is chosen by accident type.
-
-```mermaid
-flowchart TD
-    A[Call-Collected Fields] --> B[CRM / Intake Store]
-    B --> C[Generate Secure Intake Link]
-    C --> D[Prefilled Intake Form]
-    D --> E[Client Completes Missing Fields]
-    E --> F[Update CRM / Intake Store]
-```
-
 ## Intake Form Structure
 
 A 5-step form. Step 4 is **conditional on accident type**.
@@ -188,50 +180,6 @@ A 5-step form. Step 4 is **conditional on accident type**.
 - **IntakeField** — normalized per-field value with `source`, `status`, `confidence`, and client-facing/staff-only flags.
 - **Call** (`intakeCalls`) — Vapi call metadata: id, direction, transcript, summary, recording link.
 - **EmailLog** — each form/reminder email attempt and its status.
-
-```mermaid
-erDiagram
-    CLIENT ||--o{ CASE : has
-    CASE ||--o{ INTAKE_FIELD : contains
-    CASE ||--o{ CALL : records
-    CASE ||--o{ EMAIL_LOG : sends
-
-    CLIENT {
-        string id
-        string firstName
-        string lastName
-        string phone
-        string email
-    }
-    CASE {
-        string id
-        string clientId
-        string status
-        string accidentType
-        string accidentDate
-    }
-    INTAKE_FIELD {
-        string id
-        string caseId
-        string fieldKey
-        string value
-        string source
-        string status
-    }
-    CALL {
-        string id
-        string caseId
-        string vapiCallId
-        string direction
-        string transcript
-    }
-    EMAIL_LOG {
-        string id
-        string caseId
-        string toEmail
-        string status
-    }
-```
 
 ## Field Source Tracking
 
@@ -274,17 +222,10 @@ the inbound intake prompt has no opt-out step.
 
 ## Email Flow
 
-```mermaid
-flowchart LR
-    A[Call Ends] --> B[Generate Intake Link]
-    B --> C[Send Email]
-    C --> D[Client Opens Form]
-    D --> E[Client Completes Missing Fields]
-```
-
-If `SENDGRID_API_KEY` is missing or `DRY_RUN_EMAILS=true`, the app logs the email
-instead of sending it and records an `EmailLog`. Reminders are basic in this MVP
-(`POST /api/intake/send-reminder`) — no automated schedule.
+Three emails: (1) the **intake form link** after the call, (2) a **confirmation**
+once all required fields + documents are complete, and (3) **missing-info reminders**
+during the follow-up workflow (max 3, 24h apart, 3-day window). If `SENDGRID_API_KEY`
+is missing or `DRY_RUN_EMAILS=true`, emails are logged instead of sent.
 
 ## Current MVP Scope (implemented)
 
