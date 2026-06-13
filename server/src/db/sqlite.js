@@ -9,7 +9,8 @@ import { mkdirSync } from 'fs';
 const require = createRequire(import.meta.url);
 
 export function sqlitePath() {
-  return resolve(process.env.SQLITE_PATH || './data/medvoice.db');
+  const p = process.env.SQLITE_PATH || './data/medvoice.db';
+  return p === ':memory:' ? ':memory:' : resolve(p); // don't resolve the in-memory sentinel
 }
 
 const SCHEMA = `

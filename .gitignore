@@ -31,3 +31,5 @@ data/mock-db.json
 # SQLite dev database
 server/data/*.db
 *.db
+:memory:
+server/:memory:
