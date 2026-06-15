@@ -10,10 +10,15 @@ import {
   getMissingFields,
   getMissingDocuments,
   recordDocumentUpload,
+  markDocumentUnavailable,
+  markDocumentMissing,
 } from '../mvp/intakeService.js';
+
+const isAnswered = (v) => v !== null && v !== undefined && v !== '';
 import { sendSimpleReminderEmail, sendConfirmationEmail } from '../mvp/emailService.js';
 import { CASE_STATUS } from '../mvp/models.js';
 import { STAFF_ONLY_FIELD_KEYS } from '../config/intakeFields.js';
+import { logCommunication } from '../crm/communications.js';
 
 const router = Router();
 
@@ -45,17 +50,42 @@ router.post('/:token', async (req, res) => {
 
   await upsertIntakeFields(theCase.id, fields, 'form');
 
-  // Document uploads: { documents: [{type, uploadedFileUrl}] } or { documents: {type: url} }.
+  // Document handling. Three shapes are accepted:
+  //   documents: [{ type, uploadedFileUrl?, notAvailable? }]   (form sends this)
+  //   documents: { type: url }                                  (legacy upload-only)
+  //   documentsUnavailable: { type: true|false }                (curl/test convenience)
+  // `notAvailable: true` records "I don't have access to this document right now",
+  // which stops it counting as missing. An empty value with no flag → still missing
+  // (a blank field must never silently mark a document received).
   const docs = req.body?.documents;
   if (Array.isArray(docs)) {
-    for (const d of docs) await recordDocumentUpload(theCase.id, d.type, d.uploadedFileUrl ?? d.url);
+    for (const d of docs) {
+      const url = d.uploadedFileUrl ?? d.url;
+      if (d.notAvailable === true || d.status === 'not_available') await markDocumentUnavailable(theCase.id, d.type, d.unavailableReason ?? d.reason);
+      else if (isAnswered(url)) await recordDocumentUpload(theCase.id, d.type, url, d.fileName);
+      else await markDocumentMissing(theCase.id, d.type);
+    }
   } else if (docs && typeof docs === 'object') {
-    for (const [type, url] of Object.entries(docs)) await recordDocumentUpload(theCase.id, type, url);
+    for (const [type, url] of Object.entries(docs)) {
+      if (isAnswered(url)) await recordDocumentUpload(theCase.id, type, url);
+    }
+  }
+  const docsUnavailable = req.body?.documentsUnavailable;
+  if (docsUnavailable && typeof docsUnavailable === 'object') {
+    for (const [type, flag] of Object.entries(docsUnavailable)) {
+      if (flag) await markDocumentUnavailable(theCase.id, type);
+      else await markDocumentMissing(theCase.id, type);
+    }
   }
 
+  await logCommunication({
+    caseId: theCase.id, clientId: theCase.clientId, channel: 'form', direction: 'inbound',
+    type: 'intake_form_submitted', status: 'completed', subject: 'Intake form submitted',
+  });
+
   const updated = await recomputeCaseStatus(theCase.id);
-  // Confirmation email only when the submission completes the intake.
-  if (updated.status === CASE_STATUS.COMPLETE) await sendConfirmationEmail(theCase.id);
+  // Confirmation email once the client's side is done (case handed to a case manager).
+  if (updated.status === CASE_STATUS.READY_FOR_CASE_MANAGER) await sendConfirmationEmail(theCase.id);
   res.json({
     ok: true,
     caseId: theCase.id,

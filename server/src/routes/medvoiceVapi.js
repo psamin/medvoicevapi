@@ -102,11 +102,11 @@ router.get('/opt-out', async (req, res) => {
   res.json({ ok: true, phone, normalized: normalizePhoneNumber(phone), optedOut: await isOptedOut(phone) });
 });
 
-// POST /api/vapi/opt-out  { phone, reason? }  → manually mark a number opted out.
+// POST /api/vapi/opt-out  { phone, reason?, caseId? }  → manually mark a number opted out.
 router.post('/opt-out', async (req, res) => {
-  const { phone, reason } = req.body || {};
+  const { phone, reason, caseId } = req.body || {};
   if (!phone) return res.status(400).json({ ok: false, error: 'phone is required' });
-  const optOut = await markOptOut(phone, { source: 'manual', reason });
+  const optOut = await markOptOut(phone, { source: 'manual', reason, caseId: caseId ?? null });
   res.json({ ok: true, optedOut: true, optOutId: optOut.id, normalized: normalizePhoneNumber(phone) });
 });
 
