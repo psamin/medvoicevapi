@@ -12,6 +12,7 @@ export default function IntakeForm({ params }) {
   const [payload, setPayload] = useState(null);
   const [values, setValues] = useState({});
   const [docValues, setDocValues] = useState({});
+  const [docUnavailable, setDocUnavailable] = useState({});
   const [error, setError] = useState(null);
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState(null);
@@ -26,8 +27,13 @@ export default function IntakeForm({ params }) {
       for (const step of data.steps) for (const sec of step.sections) for (const f of sec.fields) v[f.key] = f.value ?? '';
       setValues(v);
       const dv = {};
-      for (const d of data.documents || []) dv[d.type] = d.uploadedFileUrl ?? '';
+      const du = {};
+      for (const d of data.documents || []) {
+        dv[d.type] = d.uploadedFileUrl ?? '';
+        du[d.type] = d.status === 'not_available';
+      }
       setDocValues(dv);
+      setDocUnavailable(du);
     } catch (e) {
       setError(e.message);
     }
@@ -47,7 +53,14 @@ export default function IntakeForm({ params }) {
       const res = await fetch(`${API_BASE}/api/intake/${token}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ fields: values, documents: docValues }),
+        body: JSON.stringify({
+          fields: values,
+          documents: (payload.documents || []).map((d) => ({
+            type: d.type,
+            uploadedFileUrl: docUnavailable[d.type] ? '' : docValues[d.type] || '',
+            notAvailable: !!docUnavailable[d.type],
+          })),
+        }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error || 'Submit failed');
@@ -96,23 +109,36 @@ export default function IntakeForm({ params }) {
       {(payload.documents || []).length > 0 && (
         <section style={s.step}>
           <h2 style={s.stepTitle}>Documents</h2>
-          <p style={s.muted}>Paste a link or filename for each document you can provide.</p>
+          <p style={s.muted}>Paste a link or filename for each document you can provide. If you don’t have one right now, check the box — it won’t hold up your intake.</p>
           <div style={s.grid}>
-            {payload.documents.map((d) => (
-              <label key={d.type} style={s.label}>
-                <span>
-                  {d.label}{d.required && <span style={{ color: '#c0392b' }}> *</span>}
-                  {d.status === 'received' ? <em style={{ color: '#1b7a3d' }}> ✓ received</em> : null}
-                </span>
-                <input
-                  type="text"
-                  placeholder="link or filename"
-                  value={docValues[d.type] ?? ''}
-                  onChange={(e) => { setDocValues((p) => ({ ...p, [d.type]: e.target.value })); setSavedMsg(null); }}
-                  style={s.input}
-                />
-              </label>
-            ))}
+            {payload.documents.map((d) => {
+              const na = !!docUnavailable[d.type];
+              return (
+                <label key={d.type} style={s.label}>
+                  <span>
+                    {d.label}{d.required && <span style={{ color: '#c0392b' }}> *</span>}
+                    {d.status === 'received' ? <em style={{ color: '#1b7a3d' }}> ✓ received</em> : null}
+                    {d.status === 'not_available' ? <em style={{ color: '#9a7d0a' }}> — marked unavailable</em> : null}
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="link or filename"
+                    value={na ? '' : docValues[d.type] ?? ''}
+                    disabled={na}
+                    onChange={(e) => { setDocValues((p) => ({ ...p, [d.type]: e.target.value })); setSavedMsg(null); }}
+                    style={{ ...s.input, ...(na ? s.inputDisabled : null) }}
+                  />
+                  <label style={s.checkRow}>
+                    <input
+                      type="checkbox"
+                      checked={na}
+                      onChange={(e) => { setDocUnavailable((p) => ({ ...p, [d.type]: e.target.checked })); setSavedMsg(null); }}
+                    />
+                    <span>I don’t have access to this document right now.</span>
+                  </label>
+                </label>
+              );
+            })}
           </div>
         </section>
       )}
@@ -160,6 +186,8 @@ const s = {
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 12 },
   label: { display: 'flex', flexDirection: 'column', gap: 4, fontSize: 13, fontWeight: 600, color: '#333' },
   input: { padding: '8px 10px', border: '1px solid #ccc', borderRadius: 6, fontSize: 14, fontWeight: 400, fontFamily: 'inherit' },
+  inputDisabled: { background: '#f3f4f6', color: '#9aa0a6' },
+  checkRow: { display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 400, color: '#667' },
   help: { color: '#999', fontWeight: 400, fontSize: 11 },
   needed: { color: '#c0392b', fontWeight: 400, fontSize: 11 },
   btn: { marginTop: 18, padding: '11px 22px', background: '#2c3e50', color: '#fff', border: 'none', borderRadius: 7, cursor: 'pointer', fontSize: 15, fontWeight: 600 },
