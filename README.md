@@ -90,55 +90,68 @@ Full details and troubleshooting: [docs/medvoice-mvp.md](docs/medvoice-mvp.md).
 ```mermaid
 flowchart TD
     A[Client calls inbound number] --> B[AI Voice Agent conducts intake]
-    B --> C[Backend receives structured intake data]
-    C --> D[(SQLite Database)]
+    B --> C[End-of-call webhook: structured intake data]
+    C --> D[(SQLite: clients, cases, intake fields, calls)]
+    C --> LOG[Log communication + audit trail]
 
-    D --> E[Generate intake form]
-    E --> F[Pre-fill collected fields]
-    E --> G[Show empty missing fields]
-    E --> H[Show missing document upload requirements]
+    D --> E[Generate prefilled intake form]
+    E --> F[Pre-fill AI-captured fields]
+    E --> G[Show empty required fields]
+    E --> H["Document requirements<br/>(upload OR 'I don't have access')"]
 
-    F --> I[Email intake form to client]
+    F --> I[Email secure form link to client]
     G --> I
     H --> I
 
-    I --> J[Client submits completed form and uploads documents]
+    I --> J[Client submits form: fields + documents]
     J --> K[Backend validates required fields and documents]
 
-    K -->|Complete| L[Mark intake complete]
+    K -->|Field or document still missing| O[missing_info]
+    O --> P{Attempts < 3 and within 3 days?}
+    P -->|Yes| Q[Wait 24h → outbound call + email reminder]
+    Q --> R[Record follow_up_attempt + communication]
+    R --> J
+    P -->|No| S[manual_review<br/>+ manual_followup task]
+
+    K -->|All fields done; docs uploaded or marked unavailable| L[ready_for_case_manager]
     L --> M[Send confirmation email]
-    M --> N[Notify client: case manager will follow up]
+    L --> N[Create review_intake task + case-manager handoff]
+    L -.->|some docs marked unavailable| N2[Flag documentsPendingReview]
 
-    K -->|Still missing info| O[Mark intake missing_info]
-    O --> P[Start follow-up workflow]
+    %% cross-cutting CRM concerns
+    B -.->|client asks to stop| X[opted_out:<br/>first-class on client,<br/>blocks all outreach]
+    C -.->|same name, new number| Y[possible_duplicate<br/>+ duplicate_review task]
+    J -.->|document uploaded| DT[review_document task]
 
-    P --> Q{Attempts < 3 and within 3 days?}
-    Q -->|Yes| R[Wait 24 hours]
-    R --> S[Send outbound call reminder]
-    S --> T[Send email reminder]
-    T --> U[Client resubmits intake form]
-    U --> K
-
-    Q -->|No| V[Stop automated outreach]
-    V --> W[Mark follow_up_exhausted]
-    W --> X[Flag for case manager review]
+    L --> Z[[Case-manager queues · tasks · communications timeline · audit log]]
+    S --> Z
+    N --> Z
+    X --> Z
+    Y --> Z
+    DT --> Z
 ```
 
 - **AI Voice Agent (Vapi)** — runs the call (Deepgram transcription, OpenAI model, voice) and saves intake data to the backend via tools + the end-of-call webhook.
-- **Backend** (`server/`, Express/ESM) — persists intake data, generates the unified form, validates required fields/documents, sends email, and runs the follow-up workflow.
-- **SQLite database** — the **source of truth** for local/dev (`server/data/medvoice.db`). JSON is only used for payloads/logging, never as the store. (Postgres is supported via `DATABASE_URL` for production.)
-- **Intake form** (`frontend/app/intake/[token]/page.js`) — one unified, token-secured form: prefilled fields, empty missing fields, and document-upload requirements.
-- **Follow-up workflow** — outbound call/email reminders, capped at 3 attempts over 3 days, 24h apart, never to opted-out clients.
+- **Backend** (`server/`, Express/ESM) — persists intake data, generates the unified form, validates required fields/documents, sends email, runs the follow-up workflow, and drives the CRM (tasks, queues, communications, audit).
+- **SQLite database** — the **source of truth** for local/dev (`server/data/medvoice.db`). Holds clients, cases, intake fields, documents, calls, emails, **tasks, notes, communications, audit logs, and follow-up attempts**. (Postgres is supported via `DATABASE_URL` for production.)
+- **Intake form** (`frontend/app/intake/[token]/page.js`) — one unified, token-secured form: prefilled fields, empty required fields, and per-document upload **or an "I don't have access to this document" option** (so a client never stays stuck over a document they can't supply).
+- **Follow-up workflow** — outbound call/email reminders, capped at 3 attempts over 3 days, 24h apart, never to opted-out clients; every attempt (sent or skipped, with reason) is recorded, and exhaustion routes the case to `manual_review`.
+- **CRM layer** — auto-created **tasks** (review intake/document, duplicate review, manual follow-up), a unified **communications timeline** (every call/email/form/skip), an immutable **audit log** of all state changes, and operational **queues** (`/api/crm/queues`) so case managers work from "what needs attention" rather than static lists. AI-extracted fields are tracked separately from **human-verified** ones.
 
 ## Intake Status Lifecycle
 
-- `new` — intake started but not yet processed
-- `in_progress` — voice agent is collecting information
-- `form_sent` — intake form was generated and sent to the client
-- `missing_info` — client submitted the form but required fields or documents are still missing
-- `complete` — all required fields and documents are complete
-- `follow_up_exhausted` — system attempted 3 follow-ups over 3 days and stopped automated outreach
-- `case_manager_review` — intake needs human review or manual follow-up
+The client-facing intake funnel, then the case-manager workflow:
+
+- `new` / `in_progress` — intake started; voice agent is collecting information
+- `form_sent` — intake form generated and emailed to the client *(end-of-call rests here; follow-ups don't run yet)*
+- `missing_info` — client submitted the form but required fields or documents are still missing *(the only state the follow-up job acts on)*
+- `ready_for_case_manager` — client's side is complete (fields done; documents uploaded or marked unavailable); confirmation email sent and a `review_intake` task is created
+- `case_manager_review` — flagged for human review (e.g. `humanFollowUpNeeded` set on the call)
+- `manual_review` — automated follow-up exhausted (3 attempts / 3-day window); a `manual_followup` task is created
+- `opted_out` — client opted out / do-not-call; all automated outreach stops
+- `attorney_review` → `accepted` / `rejected` / `closed` — downstream legal stages
+
+*(Legacy `complete` and `follow_up_exhausted` are retained as aliases and map to `ready_for_case_manager` and `manual_review` respectively.)*
 
 ## Call Intake Flow
 
