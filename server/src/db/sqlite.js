@@ -52,9 +52,33 @@ CREATE TABLE IF NOT EXISTS email_logs (
   id TEXT PRIMARY KEY, case_id TEXT, doc TEXT NOT NULL, created_at TEXT
 );
 CREATE INDEX IF NOT EXISTS email_logs_case_idx ON email_logs(case_id);
+
+-- ── CRM tables (case manager workflow) ──
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY, case_id TEXT, doc TEXT NOT NULL, created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS tasks_case_idx ON tasks(case_id);
+
+CREATE TABLE IF NOT EXISTS notes (
+  id TEXT PRIMARY KEY, case_id TEXT, doc TEXT NOT NULL, created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS notes_case_idx ON notes(case_id);
+
+CREATE TABLE IF NOT EXISTS communications (
+  id TEXT PRIMARY KEY, case_id TEXT, doc TEXT NOT NULL, created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS communications_case_idx ON communications(case_id);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id TEXT PRIMARY KEY, case_id TEXT, doc TEXT NOT NULL, created_at TEXT, updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS audit_logs_case_idx ON audit_logs(case_id);
 `;
 
-const TABLES = ['clients', 'cases', 'intake_fields', 'required_documents', 'follow_up_attempts', 'intake_calls', 'email_logs'];
+const TABLES = [
+  'clients', 'cases', 'intake_fields', 'required_documents', 'follow_up_attempts',
+  'intake_calls', 'email_logs', 'tasks', 'notes', 'communications', 'audit_logs',
+];
 
 let db = null;
 
