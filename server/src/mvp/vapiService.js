@@ -14,6 +14,8 @@ import {
 } from './intakeService.js';
 import { sendIntakeFormEmail } from './emailService.js';
 import { redactSensitive } from '../config/intakeFields.js';
+import { logCommunication } from '../crm/communications.js';
+import { recordAudit, auditStatusChange } from '../crm/audit.js';
 
 // Pull the bits we need from either a Vapi end-of-call-report webhook payload or a
 // flat test payload. Captured fields come from Vapi structured outputs
@@ -66,11 +68,26 @@ export async function processVapiEndOfCall(body = {}) {
     })
   );
 
-  const token = await generateIntakeToken(theCase.id);
-  await updateCase(theCase.id, {
-    status: humanFollowUp ? CASE_STATUS.CASE_MANAGER_REVIEW : CASE_STATUS.FORM_SENT,
-    formSentAt: new Date().toISOString(),
+  // Every AI call is recorded in the communications timeline + audit trail.
+  await logCommunication({
+    caseId: theCase.id, clientId: client.id, channel: 'call', direction: e.direction,
+    type: 'vapi_call', status: 'completed', subject: 'AI intake call',
+    bodySummary: e.summary, externalProvider: 'vapi', externalId: e.vapiCallId,
   });
+  await recordAudit({
+    actorType: 'ai', action: 'intake_call_processed', entityType: 'case', entityId: theCase.id,
+    caseId: theCase.id, clientId: client.id, newValue: { fields: Object.keys(redactSensitive(fields)) },
+  });
+
+  const token = await generateIntakeToken(theCase.id);
+  const fromStatus = theCase.status;
+  const toStatus = humanFollowUp ? CASE_STATUS.CASE_MANAGER_REVIEW : CASE_STATUS.FORM_SENT;
+  await updateCase(theCase.id, {
+    status: toStatus,
+    formSentAt: new Date().toISOString(),
+    ...(humanFollowUp ? { caseManagerHandoffRequired: true, caseManagerHandoffReason: 'flagged during call', caseManagerHandoffAt: new Date().toISOString() } : {}),
+  });
+  await auditStatusChange({ caseId: theCase.id, clientId: client.id, from: fromStatus, to: toStatus, actorType: 'ai' });
 
   const emailLog = await sendIntakeFormEmail(theCase.id);
 
@@ -94,6 +111,12 @@ export async function triggerVapiOutboundTestCall({ phone, caseId = null } = {})
   // do NOT treat this as a failed call. Runs before dry-run and real dialing.
   if (await isOptedOut(phone)) {
     console.warn(`[vapi-call] BLOCKED outbound to ${normalizePhoneNumber(phone)} — number has opted out`);
+    if (caseId) {
+      await logCommunication({
+        caseId, channel: 'call', direction: 'outbound', type: 'follow_up_call', status: 'skipped',
+        skippedReason: 'opted_out', subject: 'Outbound call skipped (opted out)',
+      });
+    }
     return { skipped: true, reason: 'opted_out', message: 'This number has opted out of calls.', phone, caseId };
   }
 
@@ -101,7 +124,10 @@ export async function triggerVapiOutboundTestCall({ phone, caseId = null } = {})
 
   if (dryRun) {
     console.log(`[vapi-call:dry-run] outbound to ${phone} (assistant=${process.env.VAPI_ASSISTANT_ID || 'unset'})`);
-    if (caseId) await repo.intakeCalls.insert(newIntakeCall({ caseId, direction: 'outbound', status: 'dry_run' }));
+    if (caseId) {
+      await repo.intakeCalls.insert(newIntakeCall({ caseId, direction: 'outbound', status: 'dry_run' }));
+      await logCommunication({ caseId, channel: 'call', direction: 'outbound', type: 'follow_up_call', status: 'sent', subject: 'Outbound follow-up call (dry-run)' });
+    }
     return { dryRun: true, phone, caseId, message: 'DRY_RUN_VAPI_CALLS or missing VAPI_API_KEY — call not placed.' };
   }
 

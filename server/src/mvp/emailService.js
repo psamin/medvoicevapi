@@ -9,6 +9,7 @@ import {
   generateIntakeToken,
   getMissingFields,
 } from './intakeService.js';
+import { logCommunication } from '../crm/communications.js';
 
 const logEmail = (rec) => repo.emailLogs.insert(newEmailLog(rec));
 
@@ -22,16 +23,30 @@ function formUrl(token) {
   return `${base}/intake/${token}`;
 }
 
-// Low-level send: dry-run logs; real send hits SendGrid v3. Always writes EmailLog.
-async function deliver({ caseId, toEmail, subject, body }) {
+// Mirror an email into the communications timeline (every email is tracked).
+async function logEmailComm({ caseId, clientId, type, subject, status }) {
+  await logCommunication({
+    caseId, clientId, channel: 'email', direction: 'outbound',
+    type: type ?? 'email', status: status === 'failed' ? 'failed' : 'sent',
+    subject, externalProvider: 'sendgrid',
+  });
+}
+
+// Low-level send: dry-run logs; real send hits SendGrid v3. Always writes EmailLog
+// AND a communications-timeline row (type identifies which email it was).
+async function deliver({ caseId, clientId, type, toEmail, subject, body }) {
   if (!toEmail) {
     console.warn(`[email] skipped (no recipient) case=${caseId}`);
-    return logEmail({ caseId, toEmail, subject, body, status: 'failed', reason: 'no recipient email' });
+    const log = await logEmail({ caseId, toEmail, subject, body, status: 'failed', reason: 'no recipient email' });
+    await logEmailComm({ caseId, clientId, type, subject, status: 'failed' });
+    return log;
   }
 
   if (isDryRun()) {
     console.log(`[email:dry-run] to=${toEmail} subject="${subject}"`);
-    return logEmail({ caseId, toEmail, subject, body, status: 'dry_run', reason: 'DRY_RUN_EMAILS or missing SENDGRID_API_KEY' });
+    const log = await logEmail({ caseId, toEmail, subject, body, status: 'dry_run', reason: 'DRY_RUN_EMAILS or missing SENDGRID_API_KEY' });
+    await logEmailComm({ caseId, clientId, type, subject, status: 'sent' });
+    return log;
   }
 
   try {
@@ -48,13 +63,19 @@ async function deliver({ caseId, toEmail, subject, body }) {
     if (!res.ok) {
       const reason = `SendGrid ${res.status}: ${(await res.text()).slice(0, 200)}`;
       console.error(`[email] send failed case=${caseId}: ${reason}`);
-      return logEmail({ caseId, toEmail, subject, body, status: 'failed', reason });
+      const log = await logEmail({ caseId, toEmail, subject, body, status: 'failed', reason });
+      await logEmailComm({ caseId, clientId, type, subject, status: 'failed' });
+      return log;
     }
     console.log(`[email] sent to=${toEmail} subject="${subject}"`);
-    return logEmail({ caseId, toEmail, subject, body, status: 'sent' });
+    const log = await logEmail({ caseId, toEmail, subject, body, status: 'sent' });
+    await logEmailComm({ caseId, clientId, type, subject, status: 'sent' });
+    return log;
   } catch (err) {
     console.error(`[email] send error case=${caseId}: ${err.message}`);
-    return logEmail({ caseId, toEmail, subject, body, status: 'failed', reason: err.message });
+    const log = await logEmail({ caseId, toEmail, subject, body, status: 'failed', reason: err.message });
+    await logEmailComm({ caseId, clientId, type, subject, status: 'failed' });
+    return log;
   }
 }
 
@@ -74,7 +95,7 @@ export async function sendIntakeFormEmail(caseId) {
     `A few details are already filled in from our call — you just need to complete ` +
     `what's missing. You can save partial progress and finish later.\n\n` +
     `Thank you,\nThe MedVoice Intake Team`;
-  return deliver({ caseId, toEmail: client?.email, subject, body });
+  return deliver({ caseId, clientId: theCase.clientId, type: 'intake_form_sent', toEmail: client?.email, subject, body });
 }
 
 // Confirmation email — sent only once all required fields + documents are complete.
@@ -87,7 +108,7 @@ export async function sendConfirmationEmail(caseId) {
     `Hi${client?.firstName ? ` ${client.firstName}` : ''},\n\n` +
     `Thank you — we've received your completed intake. A case manager will review it ` +
     `and follow up with you about next steps.\n\nThank you,\nThe MedVoice Intake Team`;
-  return deliver({ caseId, toEmail: client?.email, subject, body });
+  return deliver({ caseId, clientId: theCase.clientId, type: 'confirmation_email', toEmail: client?.email, subject, body });
 }
 
 // Basic reminder when required fields remain (no scheduling logic in this MVP).
@@ -106,6 +127,6 @@ export async function sendSimpleReminderEmail(caseId) {
     `Hi${client.firstName ? ` ${client.firstName}` : ''},\n\n` +
     `Just a quick reminder to finish your intake form — there are still ${missing.length} ` +
     `item(s) to complete:\n\n${link}\n\nThank you,\nThe MedVoice Intake Team`;
-  const log = await deliver({ caseId, toEmail: client.email, subject, body });
+  const log = await deliver({ caseId, clientId: theCase.clientId, type: 'follow_up_email', toEmail: client.email, subject, body });
   return { skipped: false, missingCount: missing.length, log };
 }
