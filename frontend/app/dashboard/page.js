@@ -56,6 +56,7 @@ export default function Dashboard() {
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   {c.possibleDuplicate && <span style={{ ...s.tag, ...s.dup }}>POSSIBLE DUPLICATE</span>}
+                  {c.documentsPendingReview && <span style={{ ...s.tag, ...s.warn }}>DOCS PENDING</span>}
                   {c.humanFollowUpNeeded && <span style={{ ...s.tag, ...s.warn }}>HUMAN</span>}
                   <span style={{ ...s.tag, ...statusTone(c.status) }}>{c.status}</span>
                   <span style={s.chev}>{open ? '▾' : '▸'}</span>
@@ -79,7 +80,10 @@ export default function Dashboard() {
                           <tr key={f.key}>
                             <td style={s.td}>{f.label}</td>
                             <td style={s.td}>{String(f.value)}</td>
-                            <td style={s.td}><span style={{ ...s.tag, ...sourceTone(f.source) }}>{f.source}</span></td>
+                            <td style={s.td}>
+                              <span style={{ ...s.tag, ...sourceTone(f.source) }}>{f.source}</span>
+                              {f.verifiedByHuman ? <span style={{ ...s.tag, ...s.done, marginLeft: 4 }}>✓ verified</span> : null}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -99,6 +103,34 @@ export default function Dashboard() {
                         {v.summary && <div style={s.muted}>Summary: {v.summary}</div>}
                         {v.transcript && <details><summary style={s.link}>transcript</summary><pre style={s.pre}>{v.transcript}</pre></details>}
                         {v.recordingUrl && <a href={v.recordingUrl} style={s.link}>recording</a>}
+                      </div>
+                    ))}
+                  </Section>
+
+                  <Section title={`Documents (${(c.documents || []).length})`}>
+                    {(c.documents || []).length === 0 ? <span style={s.muted}>none</span> : (c.documents || []).map((d) => (
+                      <div key={d.type} style={s.muted}>
+                        {d.label}{d.required ? ' *' : ''}: <strong>{d.status}</strong>
+                        {d.status === 'not_available' && d.unavailableReason ? ` (${d.unavailableReason})` : ''}
+                      </div>
+                    ))}
+                  </Section>
+
+                  <Section title={`Tasks (${(c.tasks || []).filter((t) => t.status !== 'done' && t.status !== 'cancelled').length} open)`}>
+                    {(c.tasks || []).length === 0 ? <span style={s.muted}>none</span> : (c.tasks || []).map((t) => (
+                      <div key={t.id} style={s.muted}>
+                        <span style={{ ...s.tag, ...(t.status === 'done' ? s.done : s.warn) }}>{t.type}</span> {t.title}
+                        {t.priority === 'high' ? <strong style={{ color: '#b3261e' }}> · high</strong> : ''}
+                        {t.status === 'done' ? ' · ✓' : ''}
+                      </div>
+                    ))}
+                  </Section>
+
+                  <Section title={`Communications (${(c.communications || []).length})`}>
+                    {(c.communications || []).length === 0 ? <span style={s.muted}>none</span> : (c.communications || []).map((m) => (
+                      <div key={m.id} style={s.muted}>
+                        {m.direction}/{m.channel} · <strong>{m.type}</strong> · {m.status}
+                        {m.status === 'skipped' && m.skippedReason ? ` (skipped: ${m.skippedReason})` : ''}
                       </div>
                     ))}
                   </Section>
@@ -128,10 +160,12 @@ function Section({ title, children }) {
 }
 
 function statusTone(status) {
-  if (status === 'complete') return { background: '#d4f4dd', color: '#1b7a3d' };
-  if (status === 'case_manager_review') return { background: '#fde2e1', color: '#b3261e' };
-  if (status === 'follow_up_exhausted') return { background: '#f5d0d0', color: '#7a1f1f' };
-  if (status === 'missing_info') return { background: '#fef3cd', color: '#8a6d00' };
+  if (status === 'complete' || status === 'accepted') return { background: '#d4f4dd', color: '#1b7a3d' };
+  if (status === 'ready_for_case_manager') return { background: '#dbeafe', color: '#1e40af' };
+  if (status === 'case_manager_review' || status === 'attorney_review') return { background: '#fde2e1', color: '#b3261e' };
+  if (status === 'manual_review' || status === 'follow_up_exhausted' || status === 'rejected') return { background: '#f5d0d0', color: '#7a1f1f' };
+  if (status === 'opted_out') return { background: '#e2d6f0', color: '#5b2a86' };
+  if (status === 'missing_info' || status === 'documents_pending') return { background: '#fef3cd', color: '#8a6d00' };
   return { background: '#e9ecef', color: '#495057' };
 }
 function sourceTone(src) {
@@ -154,6 +188,7 @@ const s = {
   tag: { fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, letterSpacing: '0.04em' },
   dup: { background: '#ffe0b2', color: '#9a5b00' },
   warn: { background: '#fde2e1', color: '#b3261e' },
+  done: { background: '#d4f4dd', color: '#1b7a3d' },
   body: { borderTop: '1px solid #eee', marginTop: 10, paddingTop: 10 },
   dupNote: { background: '#fff7e6', border: '1px solid #ffe0b2', borderRadius: 6, padding: '8px 10px', fontSize: 13, color: '#7a4a00' },
   sectionTitle: { fontSize: 12, fontWeight: 700, textTransform: 'uppercase', color: '#7a8290', margin: '6px 0' },
