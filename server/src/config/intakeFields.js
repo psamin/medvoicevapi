@@ -14,6 +14,11 @@ function f(key, label, opts = {}) {
     section: opts.section ?? '',
     type: opts.type ?? 'text', // text|textarea|tel|email|date|time|select|boolean|number
     required: opts.required ?? false,
+    // Whether the client may answer "N/A". NOTE: field-level N/A is not yet wired into
+    // the form (documents use the "not available" mechanism); this metadata is the
+    // single source of truth for when it is. Core contact fields must never be N/A.
+    allowNA: opts.allowNA ?? false,
+    category: opts.category ?? null, // core | incident | medical | insurance_police | liability
     options: opts.options ?? null, // for type 'select'
     source: opts.source ?? null, // call|form|staff|outbound_call (set when captured)
     status: 'missing', // missing|partial|complete (per-case, computed at runtime)
@@ -40,11 +45,11 @@ export const INTAKE_FIELDS = [
   f('humanFollowUpNeeded', 'Human follow-up needed', { step: 0, section: 'Call', type: 'boolean', clientFacing: false }),
 
   // ── STEP 1: Patient ──
-  f('firstName', 'First name', { step: 1, section: 'Client Information', required: true }),
-  f('lastName', 'Last name', { step: 1, section: 'Client Information', required: true }),
+  f('firstName', 'First name', { step: 1, section: 'Client Information', required: true, category: 'core' }),
+  f('lastName', 'Last name', { step: 1, section: 'Client Information', required: true, category: 'core' }),
   f('dateOfBirth', 'Date of birth', { step: 1, section: 'Client Information', type: 'date' }),
-  f('phone', 'Phone', { step: 1, section: 'Client Information', type: 'tel', required: true }),
-  f('email', 'Email', { step: 1, section: 'Client Information', type: 'email', required: true }),
+  f('phone', 'Phone', { step: 1, section: 'Client Information', type: 'tel', required: true, category: 'core' }),
+  f('email', 'Email', { step: 1, section: 'Client Information', type: 'email', required: true, category: 'core' }),
   f('ssnLast4', 'SSN (last 4)', { step: 1, section: 'Client Information', sensitive: true, helpText: 'Last 4 digits only.' }),
   f('address', 'Street address', { step: 1, section: 'Client Information' }),
   f('city', 'City', { step: 1, section: 'Client Information' }),
@@ -59,14 +64,14 @@ export const INTAKE_FIELDS = [
   f('pcpAddress', 'PCP address', { step: 1, section: 'Primary Care Provider' }),
 
   // ── STEP 2: Incident ──
-  f('accidentDate', 'Accident date', { step: 2, section: 'Accident Details', type: 'date', required: true }),
+  f('accidentDate', 'Accident date', { step: 2, section: 'Accident Details', type: 'date', required: true, category: 'incident' }),
   f('accidentTime', 'Accident time', { step: 2, section: 'Accident Details', type: 'time' }),
-  f('accidentType', 'Accident type', { step: 2, section: 'Accident Details', type: 'select', options: ACCIDENT_TYPES, required: true }),
-  f('accidentState', 'Accident state', { step: 2, section: 'Accident Details', required: true }),
+  f('accidentType', 'Accident type', { step: 2, section: 'Accident Details', type: 'select', options: ACCIDENT_TYPES, required: true, category: 'incident' }),
+  f('accidentState', 'Accident state', { step: 2, section: 'Accident Details', required: true, allowNA: true, category: 'incident' }),
   f('accidentCounty', 'Accident county', { step: 2, section: 'Accident Details' }),
-  f('accidentCity', 'Accident city', { step: 2, section: 'Accident Details', required: true }),
+  f('accidentCity', 'Accident city', { step: 2, section: 'Accident Details', required: true, allowNA: true, category: 'incident' }),
   f('accidentSpecificLocation', 'Specific location', { step: 2, section: 'Accident Details', helpText: 'Intersection, business, or property name.' }),
-  f('accidentDescription', 'What happened', { step: 2, section: 'Accident Details', type: 'textarea', required: true }),
+  f('accidentDescription', 'What happened', { step: 2, section: 'Accident Details', type: 'textarea', required: true, category: 'incident' }),
   f('lightingTimeContext', 'Lighting / time context', { step: 2, section: 'Accident Details' }),
   f('weatherSurface', 'Weather / surface', { step: 2, section: 'Accident Details' }),
   f('policeReportFiled', 'Police report filed?', { step: 2, section: 'Accident Details', type: 'boolean' }),
@@ -86,8 +91,8 @@ export const INTAKE_FIELDS = [
   f('medicalBillsToDate', 'Medical bills to date', { step: 3, section: 'Post-Accident Treatment' }),
   f('healthInsurancePaid', 'Health insurance paid?', { step: 3, section: 'Post-Accident Treatment', type: 'boolean' }),
   f('otherClaimsValue', 'Other claims value', { step: 3, section: 'Post-Accident Treatment' }),
-  f('injurySummary', 'Injury summary', { step: 3, section: 'Post-Accident Treatment', type: 'textarea', required: true }),
-  f('treatmentStatus', 'Treatment status', { step: 3, section: 'Post-Accident Treatment', type: 'select', options: ['Not treated', 'Treating now', 'Finished treatment'] }),
+  f('injurySummary', 'Injury summary', { step: 3, section: 'Post-Accident Treatment', type: 'textarea', required: true, category: 'medical' }),
+  f('treatmentStatus', 'Treatment status', { step: 3, section: 'Post-Accident Treatment', type: 'select', options: ['Not treated', 'Treating now', 'Finished treatment'], allowNA: true, category: 'medical' }),
 
   // ── STEP 4: Conditional modules (by accidentType) ──
   // Premises Liability

@@ -3,7 +3,9 @@
 // All persistence goes through repo.js (Postgres or JSON dev store), so these
 // functions are async regardless of backend.
 import repo from './repo.js';
-import { newClient, newCase, newIntakeField, newRequiredDocument, genToken, CASE_STATUS } from './models.js';
+import { newClient, newCase, newIntakeField, newRequiredDocument, genToken, CASE_STATUS, TASK_TYPE } from './models.js';
+import { ensureTask } from '../crm/tasks.js';
+import { recordAudit, auditStatusChange } from '../crm/audit.js';
 import {
   getFieldConfig,
   isKnownField,
@@ -11,7 +13,13 @@ import {
   isFieldVisible,
   INTAKE_FIELDS,
 } from '../config/intakeFields.js';
-import { REQUIRED_DOCUMENTS, REQUIRED_DOC_TYPES, getDocConfig } from '../config/documents.js';
+import {
+  REQUIRED_DOCUMENTS,
+  REQUIRED_DOC_TYPES,
+  getDocConfig,
+  DOC_STATUS,
+  DOC_SATISFIED_STATUSES,
+} from '../config/documents.js';
 
 const isAnswered = (v) => v !== null && v !== undefined && v !== '';
 const nowIso = () => new Date().toISOString();
@@ -67,24 +75,79 @@ export async function listDocuments(caseId) {
   return repo.requiredDocuments.listByCase(caseId);
 }
 
-// Record an uploaded document (client form). url can be a filename/URL placeholder.
-export async function recordDocumentUpload(caseId, docType, url) {
+// Look up (or lazily build) the checklist row for a document type.
+async function getOrBuildDoc(caseId, docType) {
   const cfg = getDocConfig(docType);
   if (!cfg) return null; // ignore unknown document types
-  const existing = (await repo.requiredDocuments.findByCaseAndType(caseId, docType)) ||
-    newRequiredDocument({ caseId, docType, label: cfg.label, required: cfg.required });
-  return repo.requiredDocuments.save({
-    ...existing, status: 'received', uploadedFileUrl: url ?? existing.uploadedFileUrl ?? 'uploaded', uploadedAt: nowIso(), updatedAt: nowIso(),
-  });
+  return (
+    (await repo.requiredDocuments.findByCaseAndType(caseId, docType)) ||
+    newRequiredDocument({ caseId, docType, label: cfg.label, required: cfg.required })
+  );
 }
 
-// Required documents not yet received.
+// Record an uploaded document (client form). url can be a filename/URL placeholder.
+// An upload always creates a document-review task for a case manager.
+export async function recordDocumentUpload(caseId, docType, url, fileName = null) {
+  const existing = await getOrBuildDoc(caseId, docType);
+  if (!existing) return null;
+  const ts = nowIso();
+  const fileUrl = url ?? existing.fileUrl ?? existing.uploadedFileUrl ?? 'uploaded';
+  const saved = await repo.requiredDocuments.save({
+    ...existing, status: DOC_STATUS.RECEIVED, fileUrl, uploadedFileUrl: fileUrl,
+    fileName: fileName ?? existing.fileName ?? null, unavailableReason: null,
+    uploadedAt: ts, receivedAt: ts, updatedAt: ts,
+  });
+  await recordAudit({
+    actorType: 'client', action: 'document_status_changed', entityType: 'document', entityId: saved.id,
+    caseId, oldValue: { status: existing.status }, newValue: { status: DOC_STATUS.RECEIVED },
+  });
+  await ensureTask(
+    { caseId, type: TASK_TYPE.REVIEW_DOCUMENT, title: 'Review uploaded document(s)', description: `Client uploaded ${saved.label}.` },
+    { actorType: 'client' }
+  );
+  return saved;
+}
+
+// Client says "I don't have access to this document right now." It stops counting
+// as missing, but the case is flagged for case-manager review (see recompute).
+export async function markDocumentUnavailable(caseId, docType, reason = null) {
+  const existing = await getOrBuildDoc(caseId, docType);
+  if (!existing) return null;
+  const saved = await repo.requiredDocuments.save({
+    ...existing, status: DOC_STATUS.NOT_AVAILABLE, fileUrl: null, uploadedFileUrl: null,
+    unavailableReason: reason ?? existing.unavailableReason ?? null, uploadedAt: null, updatedAt: nowIso(),
+  });
+  await recordAudit({
+    actorType: 'client', action: 'document_status_changed', entityType: 'document', entityId: saved.id,
+    caseId, oldValue: { status: existing.status }, newValue: { status: DOC_STATUS.NOT_AVAILABLE, reason: saved.unavailableReason },
+  });
+  return saved;
+}
+
+// Undo: client unchecks "no access" without uploading → back to pending (missing).
+// Never clobbers a document that was actually received.
+export async function markDocumentMissing(caseId, docType) {
+  const existing = await repo.requiredDocuments.findByCaseAndType(caseId, docType);
+  if (!existing || existing.status === DOC_STATUS.RECEIVED) return existing ?? null;
+  return repo.requiredDocuments.save({ ...existing, status: DOC_STATUS.PENDING, updatedAt: nowIso() });
+}
+
+// Required documents that still block completion (not received / not marked unavailable).
 export async function getMissingDocuments(caseId) {
   const docs = await repo.requiredDocuments.listByCase(caseId);
   const byType = new Map(docs.map((d) => [d.docType, d]));
   return REQUIRED_DOC_TYPES
-    .filter((t) => (byType.get(t)?.status ?? 'pending') !== 'received')
+    .filter((t) => !DOC_SATISFIED_STATUSES.includes(byType.get(t)?.status ?? DOC_STATUS.PENDING))
     .map((t) => ({ type: t, label: getDocConfig(t)?.label ?? t }));
+}
+
+// Required documents the client marked `not_available` — a case manager must obtain
+// these even though they no longer block the client's side of the intake.
+export async function getUnavailableRequiredDocuments(caseId) {
+  const docs = await repo.requiredDocuments.listByCase(caseId);
+  return docs
+    .filter((d) => REQUIRED_DOC_TYPES.includes(d.docType) && d.status === DOC_STATUS.NOT_AVAILABLE)
+    .map((d) => ({ type: d.docType, label: d.label }));
 }
 
 export async function getCase(caseId) {
@@ -111,6 +174,18 @@ export async function flagPossibleDuplicate(caseId, client) {
     .filter((c) => c.id !== client.id);
   if (!sameName.length) return false;
   await updateCase(caseId, { possibleDuplicate: true, duplicateOfClientId: sameName[0].id });
+  await recordAudit({
+    actorType: 'system', action: 'possible_duplicate_flagged', entityType: 'case', entityId: caseId,
+    caseId, clientId: client.id, newValue: { duplicateOfClientId: sameName[0].id },
+  });
+  await ensureTask(
+    {
+      caseId, clientId: client.id, type: TASK_TYPE.DUPLICATE_REVIEW, priority: 'high',
+      title: 'Review possible duplicate client',
+      description: `Same name as ${sameName[0].firstName ?? ''} ${sameName[0].lastName ?? ''} (${sameName[0].phone ?? 'no phone'}).`,
+    },
+    { actorType: 'system' }
+  );
   return true;
 }
 
@@ -144,7 +219,8 @@ export async function upsertIntakeFields(caseId, incoming = [], source = 'call')
     } else {
       saved.push(await repo.intakeFields.save(newIntakeField({
         caseId, fieldKey: key, fieldLabel: cfg.label, value, source, status,
-        required: cfg.required, confidence: item.confidence ?? null,
+        required: cfg.required, allowNA: cfg.allowNA, category: cfg.category,
+        confidence: item.confidence ?? null,
         clientFacing: cfg.clientFacing, staffOnly: cfg.staffOnly,
       })));
     }
@@ -164,6 +240,21 @@ export async function upsertIntakeFields(caseId, incoming = [], source = 'call')
     for (const k of CASE_KEYS) if (k in headerPatch && isAnswered(headerPatch[k])) casePatch[k] = headerPatch[k];
     if (Object.keys(casePatch).length) await updateCase(caseId, casePatch);
   }
+  return saved;
+}
+
+// Mark an AI-extracted / client-submitted field as human-verified by a case manager
+// or attorney. Keeps the AI-vs-human provenance distinction explicit.
+export async function verifyIntakeField(caseId, fieldKey, userId = null, role = 'case_manager_verified') {
+  const existing = await repo.intakeFields.findByCaseAndKey(caseId, fieldKey);
+  if (!existing) return null;
+  const saved = await repo.intakeFields.save({
+    ...existing, verifiedByHuman: true, verifiedByUserId: userId, verifiedAt: nowIso(), source: role, updatedAt: nowIso(),
+  });
+  await recordAudit({
+    actorType: 'user', actorId: userId, action: 'intake_field_verified', entityType: 'intake_field', entityId: saved.id,
+    caseId, oldValue: { verifiedByHuman: existing.verifiedByHuman }, newValue: { verifiedByHuman: true, by: userId },
+  });
   return saved;
 }
 
@@ -241,12 +332,61 @@ export async function generatePrefilledFormPayload(token) {
 }
 
 // Recompute case status from required completeness (used after form submit).
+//
+// Lifecycle: while any required FIELD or required DOCUMENT is still outstanding the
+// case sits in `missing_info` (the only state the follow-up job acts on). Once the
+// client's side is done it moves to `ready_for_case_manager` — the confirmation
+// email fires, a `review_intake` task is created, and the case is handed off.
+//
+// A required document marked `not_available` no longer blocks completion, so the
+// client never stays stuck over a document they can't access; `documentsPendingReview`
+// is raised instead so a case manager obtains it later.
 export async function recomputeCaseStatus(caseId) {
   const theCase = await repo.cases.findById(caseId);
   if (!theCase) return null;
-  if (theCase.humanFollowUpNeeded) return updateCase(caseId, { status: CASE_STATUS.CASE_MANAGER_REVIEW });
+  const from = theCase.status;
+
+  if (theCase.humanFollowUpNeeded) {
+    const updated = await updateCase(caseId, {
+      status: CASE_STATUS.CASE_MANAGER_REVIEW,
+      caseManagerHandoffRequired: true,
+      caseManagerHandoffReason: theCase.caseManagerHandoffReason ?? 'flagged during call',
+      caseManagerHandoffAt: theCase.caseManagerHandoffAt ?? new Date().toISOString(),
+    });
+    await auditStatusChange({ caseId, clientId: theCase.clientId, from, to: updated.status });
+    await ensureTask(
+      { caseId, clientId: theCase.clientId, type: TASK_TYPE.REVIEW_INTAKE, priority: 'high', title: 'Review intake (flagged on call)' },
+      { actorType: 'system' }
+    );
+    return updated;
+  }
+
   const missing = await getMissingFields(caseId);
   const missingDocs = await getMissingDocuments(caseId);
-  if (missing.length || missingDocs.length) return updateCase(caseId, { status: CASE_STATUS.MISSING_INFO });
-  return updateCase(caseId, { status: CASE_STATUS.COMPLETE, completedAt: new Date().toISOString() });
+  if (missing.length || missingDocs.length) {
+    const updated = await updateCase(caseId, { status: CASE_STATUS.MISSING_INFO });
+    await auditStatusChange({ caseId, clientId: theCase.clientId, from, to: updated.status });
+    return updated;
+  }
+
+  // Client side complete → hand off to a case manager.
+  const unavailableDocs = await getUnavailableRequiredDocuments(caseId);
+  const updated = await updateCase(caseId, {
+    status: CASE_STATUS.READY_FOR_CASE_MANAGER,
+    completedAt: new Date().toISOString(),
+    documentsPendingReview: unavailableDocs.length > 0,
+    caseManagerHandoffRequired: true,
+    caseManagerHandoffReason: unavailableDocs.length ? 'intake complete; documents pending review' : 'intake complete',
+    caseManagerHandoffAt: new Date().toISOString(),
+  });
+  await auditStatusChange({ caseId, clientId: theCase.clientId, from, to: updated.status });
+  await ensureTask(
+    {
+      caseId, clientId: theCase.clientId, type: TASK_TYPE.REVIEW_INTAKE,
+      title: 'Review completed intake',
+      description: unavailableDocs.length ? `Documents pending: ${unavailableDocs.map((d) => d.label).join(', ')}.` : 'Intake complete — ready for case manager.',
+    },
+    { actorType: 'system' }
+  );
+  return updated;
 }
