@@ -12,9 +12,24 @@ import {
   updateWhere as jUpdate,
   normalizePhone,
 } from '../db/mockDb.js';
+import { TERMINAL_CASE_STATUSES } from './models.js';
 
-const OPEN_EXCLUDED = ['complete', 'closed', 'follow_up_exhausted'];
+// A returning caller reopens a case unless it has reached a terminal stage.
+const OPEN_EXCLUDED = TERMINAL_CASE_STATUSES;
 const norm = (s) => (s ? String(s).trim().toLowerCase() : '');
+
+// CRM collections added on top of the original entities. Repo key → physical table.
+const NEW_COLLECTIONS = {
+  tasks: 'tasks',
+  notes: 'notes',
+  communications: 'communications',
+  auditLogs: 'audit_logs',
+  followUpAttempts: 'follow_up_attempts',
+};
+// Build {repoKey: factory(table)} for a backend's generic collection factory.
+function mapCollections(factory) {
+  return Object.fromEntries(Object.entries(NEW_COLLECTIONS).map(([key, table]) => [key, factory(table)]));
+}
 
 /* ───────────────────────── JSON backend ───────────────────────── */
 const jsonRepo = {
@@ -94,7 +109,27 @@ const jsonRepo = {
     async insert(rec) { return jInsert('emailLogs', rec); },
     async listByCase(caseId) { return jFilter('emailLogs', (r) => r.caseId === caseId); },
   },
+  ...jsonCollections(['tasks', 'notes', 'communications', 'auditLogs', 'followUpAttempts']),
 };
+
+// Generic JSON-backed collection (insert/save/findById/list/listByCase/listByClient).
+function jsonCollection(name) {
+  return {
+    async insert(rec) { return jInsert(name, rec); },
+    async save(rec) {
+      if (jFind(name, (r) => r.id === rec.id)) jUpdate(name, (r) => r.id === rec.id, rec);
+      else jInsert(name, rec);
+      return rec;
+    },
+    async findById(id) { return jFind(name, (r) => r.id === id); },
+    async list() { return jFilter(name, () => true); },
+    async listByCase(caseId) { return jFilter(name, (r) => r.caseId === caseId); },
+    async listByClient(clientId) { return jFilter(name, (r) => r.clientId === clientId); },
+  };
+}
+function jsonCollections(names) {
+  return Object.fromEntries(names.map((n) => [n, jsonCollection(n)]));
+}
 
 /* ───────────────────────── Postgres backend ───────────────────────── */
 const one = (res) => (res.rows[0] ? res.rows[0].doc : null);
@@ -203,7 +238,32 @@ const pgRepo = {
       return (await query('SELECT doc FROM email_logs WHERE case_id=$1 ORDER BY created_at', [caseId])).rows.map((r) => r.doc);
     },
   },
+  ...mapCollections(pgCollection),
 };
+
+// Generic Postgres-backed collection. `table` is a fixed internal name (never user input).
+function pgCollection(table) {
+  return {
+    async insert(rec) {
+      await query(`INSERT INTO ${table} (id, case_id, doc) VALUES ($1,$2,$3)`, [rec.id, rec.caseId || null, rec]);
+      return rec;
+    },
+    async save(rec) {
+      await query(
+        `INSERT INTO ${table} (id, case_id, doc, updated_at) VALUES ($1,$2,$3,now())
+         ON CONFLICT (id) DO UPDATE SET case_id=EXCLUDED.case_id, doc=EXCLUDED.doc, updated_at=now()`,
+        [rec.id, rec.caseId || null, rec]
+      );
+      return rec;
+    },
+    async findById(id) { return one(await query(`SELECT doc FROM ${table} WHERE id=$1`, [id])); },
+    async list() { return (await query(`SELECT doc FROM ${table} ORDER BY created_at DESC`)).rows.map((r) => r.doc); },
+    async listByCase(caseId) { return (await query(`SELECT doc FROM ${table} WHERE case_id=$1 ORDER BY created_at`, [caseId])).rows.map((r) => r.doc); },
+    async listByClient(clientId) {
+      return (await query(`SELECT doc FROM ${table} WHERE doc->>'clientId'=$1 ORDER BY created_at`, [clientId])).rows.map((r) => r.doc);
+    },
+  };
+}
 
 /* ───────────────────────── SQLite backend (default) ───────────────────────── */
 const sdoc = (row) => (row ? JSON.parse(row.doc) : null);
@@ -244,9 +304,10 @@ const sqliteRepo = {
       return token ? sdoc(getDb().prepare('SELECT doc FROM cases WHERE form_token=?').get(token)) : null;
     },
     async findOpenByClient(clientId) {
+      const placeholders = OPEN_EXCLUDED.map(() => '?').join(',');
       return sdoc(getDb()
-        .prepare(`SELECT doc FROM cases WHERE client_id=? AND status NOT IN ('complete','closed','follow_up_exhausted') ORDER BY updated_at DESC LIMIT 1`)
-        .get(clientId));
+        .prepare(`SELECT doc FROM cases WHERE client_id=? AND status NOT IN (${placeholders}) ORDER BY updated_at DESC LIMIT 1`)
+        .get(clientId, ...OPEN_EXCLUDED));
     },
     async list() {
       return getDb().prepare('SELECT doc FROM cases ORDER BY updated_at DESC').all().map((r) => JSON.parse(r.doc));
@@ -307,7 +368,38 @@ const sqliteRepo = {
       return getDb().prepare('SELECT doc FROM email_logs WHERE case_id=? ORDER BY created_at').all(caseId).map((r) => JSON.parse(r.doc));
     },
   },
+  ...mapCollections(sqliteCollection),
 };
+
+// Generic SQLite-backed collection. `table` is a fixed internal name (never user input).
+// follow_up_attempts lacks an updated_at column, so writes use insert-only there.
+function sqliteCollection(table) {
+  const hasUpdatedAt = table !== 'follow_up_attempts';
+  return {
+    async insert(rec) {
+      const cols = hasUpdatedAt ? '(id,case_id,doc,created_at,updated_at)' : '(id,case_id,doc,created_at)';
+      const vals = hasUpdatedAt ? '(?,?,?,?,?)' : '(?,?,?,?)';
+      const args = hasUpdatedAt
+        ? [rec.id, rec.caseId || null, JSON.stringify(rec), NOW(), NOW()]
+        : [rec.id, rec.caseId || null, JSON.stringify(rec), NOW()];
+      getDb().prepare(`INSERT INTO ${table} ${cols} VALUES ${vals}`).run(...args);
+      return rec;
+    },
+    async save(rec) {
+      getDb().prepare(
+        `INSERT INTO ${table} (id,case_id,doc,created_at,updated_at) VALUES (?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET case_id=excluded.case_id, doc=excluded.doc, updated_at=excluded.updated_at`
+      ).run(rec.id, rec.caseId || null, JSON.stringify(rec), NOW(), NOW());
+      return rec;
+    },
+    async findById(id) { return sdoc(getDb().prepare(`SELECT doc FROM ${table} WHERE id=?`).get(id)); },
+    async list() { return getDb().prepare(`SELECT doc FROM ${table} ORDER BY created_at DESC`).all().map((r) => JSON.parse(r.doc)); },
+    async listByCase(caseId) { return getDb().prepare(`SELECT doc FROM ${table} WHERE case_id=? ORDER BY created_at`).all(caseId).map((r) => JSON.parse(r.doc)); },
+    async listByClient(clientId) {
+      return getDb().prepare(`SELECT doc FROM ${table} WHERE json_extract(doc,'$.clientId')=? ORDER BY created_at`).all(clientId).map((r) => JSON.parse(r.doc));
+    },
+  };
+}
 
 /* ───────────────────────── backend selection ───────────────────────── */
 function pickBackend() {
